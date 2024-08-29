@@ -20,13 +20,13 @@ class KalmanFilter(nn.Module):
         self.dim_z = dim_z
         self.dim_u = dim_u
 
-        self.x = nn.Parameter(torch.zeros((dim_x, 1)))
-        self.P = nn.Parameter(torch.eye(dim_x))
-        self.Q = nn.Parameter(torch.eye(dim_x))
+        self.x = torch.zeros((dim_x, 1))
+        self.P = torch.eye(dim_x)
+        self.Q = torch.eye(dim_x)
         self.B = None
         self.F = torch.eye(dim_x)
         self.H = torch.zeros((dim_z, dim_x))
-        self.R = nn.Parameter(torch.eye(dim_z))
+        self.R = torch.eye(dim_z)
         self._alpha_sq = 1.
         self.M = torch.zeros((dim_x, dim_z))
         self.z = torch.zeros(dim_z)

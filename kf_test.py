@@ -22,15 +22,17 @@ bbox = np.array([1689.   ,  385.   , 1835.62 ,  717.71 ,   67.567])
 
 #define constant velocity model
 kf = KalmanFilter(dim_x=7, dim_z=4) 
-kf.F = np.array([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],  [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]])
-kf.H = np.array([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]])
+kf.F = torch.tensor(np.array([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],  [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]]))
+kf.H = torch.tensor(np.array([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]]))
 
-kf.R.data[2:,2:] = kf.R[2:,2:] * 10.
-kf.P.data[4:,4:] = kf.P[4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
-kf.P.data *= 10.
+kf.R[2:,2:] = kf.R[2:,2:] * 10.
+kf.P[4:,4:] = kf.P[4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
+kf.P *= 10.
 #self.kf.Q[-1,-1].assign(self.kf.Q[-1,-1] * 0.01)
 #self.kf.Q[4:,4:].assign(self.kf.Q[4:,4:] * 0.01)
-kf.Q.data[2,2] = 50
-kf.Q.data[-1,-1] = 50
+kf.Q[2,2] = 50
+kf.Q[-1,-1] = 50
 
-kf.x.data[:4] = convert_bbox_to_z(bbox)
+kf.x[:4] = convert_bbox_to_z(bbox)
+
+kf.predict()
