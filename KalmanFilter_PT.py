@@ -6,9 +6,9 @@ from numpy import isscalar
 from copy import deepcopy
 from filterpy.common import reshape_z
 
-class KalmanFilter(nn.Module):
+class KalmanFilterModule(nn.Module):
     def __init__(self, dim_x, dim_z, dim_u=0):
-        super(KalmanFilter, self).__init__()
+        super(KalmanFilterModule, self).__init__()
         if dim_x < 1:
             raise ValueError('dim_x must be 1 or greater')
         if dim_z < 1:
@@ -20,7 +20,6 @@ class KalmanFilter(nn.Module):
         self.dim_z = dim_z
         self.dim_u = dim_u
 
-        self.x = torch.zeros((dim_x, 1))
         self.P = torch.eye(dim_x)
         self.Q = torch.eye(dim_x)
         self.B = None
@@ -37,10 +36,7 @@ class KalmanFilter(nn.Module):
         self.SI = torch.zeros((dim_z, dim_z))
 
         self._I = torch.eye(dim_x)
-        self.x_prior = self.x.clone()
         self.P_prior = self.P.clone()
-
-        self.x_post = self.x.clone()
 
         self.P_post = self.P.clone()
 
@@ -50,10 +46,10 @@ class KalmanFilter(nn.Module):
 
         self.inv = torch.inverse
 
-    def forward(self):
-        return self.predict()
+    def forward(self, x):
+        return self.predict(x)
 
-    def predict(self, u=None, B=None, F=None, Q=None):
+    def predict(self, x, u=None, B=None, F=None, Q=None):
         if B is None:
             B = self.B
         if F is None:
@@ -64,18 +60,19 @@ class KalmanFilter(nn.Module):
             Q = torch.eye(self.dim_x) * Q
 
         if B is not None and u is not None:
-            self.x = torch.matmul(F, self.x) + torch.matmul(B, u)
+            x = nn.Parameter(torch.matmul(F, x) + torch.matmul(B, u))
         else:
             #print(F)
             #print(self.x)
-            self.x = torch.matmul(F, self.x)
+            x = nn.Parameter(torch.matmul(F, x))
 
         self.P = self._alpha_sq * torch.matmul(torch.matmul(F, self.P), torch.transpose(F, 0, 1)) + Q
 
-        self.x_prior = self.x.clone()
         self.P_prior = self.P.clone()
 
-    def update(self, z, R=None, H=None):
+        return x
+
+    def update(self, x, z, R=None, H=None):
         self._log_likelihood = None
         self._likelihood = None
         self._mahalanobis = None
@@ -94,24 +91,39 @@ class KalmanFilter(nn.Module):
             R = torch.eye(self.dim_z) * R
 
         if H is None:
-            z = reshape_z(z, self.dim_z, self.dim_x)
+            z = torch.tensor(reshape_z(z, self.dim_z, self.dim_x))
             H = self.H.to(torch.float32)
 
-        self.y = z - torch.matmul(H, self.x)
+        self.y = z - torch.matmul(H, x)
 
-        PHT = torch.matmul(self.P, torch.transpose(H))
+        PHT = torch.matmul(self.P, torch.transpose(H, 0, 1))
 
         self.S = torch.matmul(H, PHT) + R
         self.SI = self.inv(self.S)
 
         self.K = torch.matmul(PHT, self.SI)
 
-        self.x = self.x + torch.matmul(self.K, self.y)
-
+        x = x + torch.matmul(self.K, self.y)
 
         I_KH = self._I - torch.matmul(self.K, H)
-        self.P = torch.matmul(torch.matmul(I_KH, self.P), torch.transpose(I_KH)) + torch.matmul(torch.matmul(self.K, R), torch.transpose(self.K))
+        self.P = torch.matmul(torch.matmul(I_KH, self.P), torch.transpose(I_KH,0, 1)) + torch.matmul(torch.matmul(self.K, R), torch.transpose(self.K, 0, 1))
 
         self.z = deepcopy(z)
-        self.x_post = self.x.clone()
+        self.x_post = x.clone()
         self.P_post = self.P.clone()
+
+        return x
+
+class KalmanFilter():
+    def __init__(self, dim_x, dim_z, dim_u=0):
+        self.x = nn.Parameter(torch.zeros((dim_x, 1)))
+        self.x_prior = self.x.clone()
+        self.x_post = self.x.clone()
+        self.model = KalmanFilterModule(dim_x, dim_z, dim_u)
+
+    def predict(self):
+        self.x = self.model(self.x)
+        self.x_prior = self.x.clone()
+
+    def update(self, z, R=None, H=None):
+        self.x = self.model.update(self.x, z, R, H)
