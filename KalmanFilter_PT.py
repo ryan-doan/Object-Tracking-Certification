@@ -70,7 +70,7 @@ class KalmanFilter(nn.Module):
             #print(self.x)
             self.x = torch.matmul(F, self.x)
 
-        self.P = self._alpha_sq * torch.matmul(torch.matmul(F, self.P), torch.transpose(F)) + Q
+        self.P = self._alpha_sq * torch.matmul(torch.matmul(F, self.P), torch.transpose(F, 0, 1)) + Q
 
         self.x_prior = self.x.clone()
         self.P_prior = self.P.clone()
