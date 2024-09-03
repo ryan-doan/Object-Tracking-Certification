@@ -55,8 +55,8 @@ def compute_l2_dist(output, label):
   return math.sqrt(math.pow(output[0] - label[0], 2) + math.pow(output[1] - label[1], 2))
 
 #generate data set
-x_delta_mean = 10
-x_std_dev = 2
+x_delta_mean = 20
+x_std_dev = 4
 y_delta_mean = 0
 y_std_dev = 2
 data, label = generate_data([1762.3, 551.36, 48782, 0.44068], 10, x_delta_mean, x_std_dev, y_delta_mean, y_std_dev)
@@ -79,8 +79,8 @@ kf.x.data[:4] = data[0]
 total_dist = 0
 for i in range(len(label)):
   kf.predict()
-  kf.update(label[i])
   total_dist += compute_l2_dist(kf.x, label[i])
   print(f'Prediction: {kf.x[0]}, {kf.x[1]}; Actual: {label[i][0]}, {label[i][1]}')
+  kf.update(label[i])
 
 print(f'Average distance between prediction and label: {total_dist/len(label)}')

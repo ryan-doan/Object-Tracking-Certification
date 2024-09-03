@@ -91,7 +91,7 @@ class KalmanFilterModule(nn.Module):
             R = torch.eye(self.dim_z) * R
 
         if H is None:
-            z = torch.tensor(reshape_z(z, self.dim_z, self.dim_x))
+            z = torch.tensor(self._reshape_z(z, self.dim_z, self.dim_x))
             H = self.H.to(torch.float32)
 
         self.y = z - torch.matmul(H, x)
@@ -113,6 +113,23 @@ class KalmanFilterModule(nn.Module):
         self.P_post = self.P.clone()
 
         return x
+    
+    def _reshape_z(self, z, dim_z, ndim):
+        z = torch.atleast_2d(z)
+
+        if z.shape[1] == dim_z:
+            z = z.T
+
+        if z.shape != (dim_z, 1):
+            raise ValueError('z must be convertible to shape ({}, 1)'.format(dim_z))
+
+        if ndim == 1:
+            z = z[:, 0]
+
+        if ndim == 0:
+            z = z[0, 0]
+
+        return z
 
 class KalmanFilter():
     def __init__(self, dim_x, dim_z, dim_u=0):
