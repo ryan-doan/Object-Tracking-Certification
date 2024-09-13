@@ -19,6 +19,10 @@ from __future__ import print_function
 
 import os
 import numpy as np
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 from skimage import io
 
 import glob
@@ -26,7 +30,6 @@ import time
 import argparse
 from KalmanFilter_PT import KalmanFilter
 import copy
-import tensorflow as tf
 import torch
 
 np.random.seed(0)
@@ -76,7 +79,7 @@ def convert_bbox_to_z(bbox):
   s = w * h    #scale is just area
   r = w / float(h)
   #return tf.convert_to_tensor(np.array([x, y, s, r]).reshape((4, 1)), dtype=tf.float32)
-  z = torch.nn.Parameter(torch.tensor([[x],[y],[s],[r]], requires_grad=True, dtype=torch.float32))
+  z = torch.tensor([[x],[y],[s],[r]], requires_grad=True, dtype=torch.float32)
   return z.view(4, 1)
 
 
@@ -105,8 +108,8 @@ class KalmanBoxTracker(object):
     """
     #define constant velocity model
     self.kf = KalmanFilter(dim_x=7, dim_z=4) 
-    self.kf.F = torch.tensor([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],  [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]])
-    self.kf.H = torch.tensor([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]])
+    self.kf.model.F = torch.tensor([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],  [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]])
+    self.kf.model.H = torch.tensor([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]])
 
     self.kf.model.R[2:,2:] = self.kf.model.R[2:,2:] * 10.
     self.kf.model.P[4:,4:] = self.kf.model.P[4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
@@ -115,6 +118,8 @@ class KalmanBoxTracker(object):
     #self.kf.Q[4:,4:].assign(self.kf.Q[4:,4:] * 0.01)
     self.kf.model.Q[2,2] = 50
     self.kf.model.Q[-1,-1] = 50
+    #self.kf.model.Q[-1,-1] *= 0.01
+    #self.kf.model.Q[4:,4:] *= 0.01
 
     self.kf.x.data[:4] = convert_bbox_to_z(bbox)
     self.time_since_update = 0
@@ -321,6 +326,9 @@ if __name__ == '__main__':
     if not os.path.exists('mot_benchmark'):
       print('\n\tERROR: mot_benchmark link not found!\n\n    Create a symbolic link to the MOT benchmark\n    (https://motchallenge.net/data/2D_MOT_2015/#download). E.g.:\n\n    $ ln -s /path/to/MOT2015_challenge/2DMOT2015 mot_benchmark\n\n')
       exit()
+    plt.ion()
+    fig = plt.figure()
+    ax1 = fig.add_subplot(111, aspect='equal')
 
   if not os.path.exists('output'):
     os.makedirs('output')
@@ -343,6 +351,8 @@ if __name__ == '__main__':
         if(display):
           fn = os.path.join('mot_benchmark', phase, seq, 'img1', '%06d.jpg'%(frame))
           im =io.imread(fn)
+          ax1.imshow(im)
+          plt.title(seq + ' Tracked Targets')
 
         start_time = time.time()
         trackers = mot_tracker.update(dets)
@@ -351,5 +361,13 @@ if __name__ == '__main__':
 
         for d in trackers:
           print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1'%(frame,d[4],d[0],d[1],d[2]-d[0],d[3]-d[1]),file=out_file)
+          if(display):
+            d = d.astype(np.int32)
+            ax1.add_patch(patches.Rectangle((d[0],d[1]),d[2]-d[0],d[3]-d[1],fill=False,lw=3,ec=colours[d[4]%32,:]))
+
+        if(display):
+          fig.canvas.flush_events()
+          plt.draw()
+          ax1.cla()
 
   print("Total Tracking took: %.3f seconds for %d frames or %.1f FPS" % (total_time, total_frames, total_frames / total_time))
