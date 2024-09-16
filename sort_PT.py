@@ -39,11 +39,11 @@ def linear_assignment(cost_matrix):
   try:
     import lap
     _, x, y = lap.lapjv(cost_matrix, extend_cost=True)
-    return torch.tensor([[y[i],i] for i in x if i >= 0]) #
+    return np.array([[y[i],i] for i in x if i >= 0]) #
   except ImportError:
     from scipy.optimize import linear_sum_assignment
     x, y = linear_sum_assignment(cost_matrix)
-    return torch.tensor(list(zip(x, y)))
+    return np.array(list(zip(x, y)))
 
 
 def iou_batch(bb_test, bb_gt):
@@ -134,11 +134,12 @@ class KalmanBoxTracker(object):
     """
     Updates the state vector with observed bbox.
     """
-    self.time_since_update = 0
-    self.history = []
-    self.hits += 1
-    self.hit_streak += 1
-    self.kf.update(convert_bbox_to_z(bbox))
+    if bbox != None:
+      self.time_since_update = 0
+      self.history = []
+      self.hits += 1
+      self.hit_streak += 1
+      self.kf.update(convert_bbox_to_z(bbox))
 
   def predict(self):
     """
@@ -147,6 +148,25 @@ class KalmanBoxTracker(object):
     if((self.kf.x[6]+self.kf.x[2])<=0):
       self.kf.x[6] = 0.0
     self.kf.predict()
+    self.age += 1
+    if(self.time_since_update>0):
+      self.hit_streak = 0
+    self.time_since_update += 1
+    self.history.append(convert_x_to_bbox(self.kf.x))
+    return self.history[-1]
+  
+  def lazy_update_and_predict(self,bbox=None):
+    if bbox != None:
+      self.time_since_update = 0
+      self.history = []
+      self.hits += 1
+      self.hit_streak += 1
+    if((self.kf.x[6]+self.kf.x[2])<=0):
+      self.kf.x[6] = 0.0
+    if bbox != None:
+      self.kf.lazy_update_and_predict(convert_bbox_to_z(bbox))
+    else:
+      self.kf.lazy_update_and_predict()
     self.age += 1
     if(self.time_since_update>0):
       self.hit_streak = 0
@@ -188,7 +208,8 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
   """
   if(len(trackers)==0):
     return np.empty((0,2),dtype=int), np.arange(len(detections)), np.empty((0,5),dtype=int)
-  iou_matrix = iou_batch(detections, trackers)
+  trackers_list = np.array(list(trackers.values()))
+  iou_matrix = iou_batch(detections, trackers_list)
 
   if min(iou_matrix.shape) > 0:
     a = (iou_matrix > iou_threshold).astype(np.int32)
@@ -196,6 +217,7 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
         matched_indices = np.stack(np.where(a), axis=1)
     else:
       matched_indices = linear_assignment(-iou_matrix)
+    #replace list indices with dict indices
   else:
     matched_indices = np.empty(shape=(0,2))
 
@@ -204,25 +226,19 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
     if(d not in matched_indices[:,0]):
       unmatched_detections.append(d)
   unmatched_trackers = []
-  for t, trk in enumerate(trackers):
-    if(t not in matched_indices[:,1]):
-      unmatched_trackers.append(t)
+  for trk_key in trackers.keys():
+    if(trk_key not in matched_indices[:,1]):
+      unmatched_trackers.append(trk_key)
 
   #filter out matched with low IOU
-  matches = []
+  matches = {}
+  keys_list = list(trackers.keys())
   for m in matched_indices:
     if(iou_matrix[m[0], m[1]]<iou_threshold):
       unmatched_detections.append(m[0])
       unmatched_trackers.append(m[1])
     else:
-      try:
-        matches.append(m.reshape(1,2))
-      except:
-        print(m)
-  if(len(matches)==0):
-    matches = np.empty((0,2),dtype=int)
-  else:
-    matches = np.concatenate(matches,axis=0)
+      matches[keys_list[m[1]]] = m[0]
 
   return matches, np.array(unmatched_detections), np.array(unmatched_trackers)
 
@@ -235,9 +251,12 @@ class Sort(object):
     self.max_age = max_age
     self.min_hits = min_hits
     self.iou_threshold = iou_threshold
-    self.trackers = []
+    self.trackers = {}
+    self.tracker_id = 1
     self.frame_count = 0
-    self.mapping = {} ## cwang: from trk.id to det row index
+    #self.mapping = {} ## cwang: from trk.id to det row index
+    self.matches = {}
+    self.prev_dets = []
 
   def update(self, dets=np.empty((0, 5))):
     """
@@ -248,41 +267,54 @@ class Sort(object):
 
     NOTE: The number of objects returned may differ from the number of detections provided.
     """
+
     self.frame_count += 1
     # get predicted locations from existing trackers.
-    trks = np.zeros((len(self.trackers), 5))
+    trks = {}
     to_del = []
     ret = []
     #mapping = {} ## yman: from trk.id to det row index
-    for t, trk in enumerate(trks):
-      pos = self.trackers[t].predict()[0]
-      trk[:] = [pos[0], pos[1], pos[2], pos[3], 0]
+    for trk_key in self.trackers.keys():
+      trk = self.trackers[trk_key]
+      if trk_key in self.matches:
+        pos = self.trackers[trk_key].lazy_update_and_predict(self.prev_dets[self.matched[t], :])[0]
+      else:
+        pos = self.trackers[trk_key].lazy_update_and_predict()[0]
+      trks[trk_key] = np.array([pos[0], pos[1], pos[2], pos[3], 0])
       if torch.any(torch.isnan(pos)):
-        to_del.append(t)
-    trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
+        to_del.append(trk_key)
+    #trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
     for t in reversed(to_del):
       self.trackers.pop(t)
     matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets,trks, self.iou_threshold)
 
+    self.matched = matched
+    self.prev_dets = dets
+
     # update matched trackers with assigned detections
-    for m in matched:
-      self.trackers[m[1]].update(dets[m[0], :])
-      self.mapping[self.trackers[m[1]].id] = m[0]
+    #for m in matched:
+      #self.trackers[m[1]].update(dets[m[0], :])
+      #self.mapping[self.trackers[m[1]].id] = m[0]
 
     # create and initialise new trackers for unmatched detections
     for i in unmatched_dets:
         trk = KalmanBoxTracker(dets[i,:])
-        self.trackers.append(trk)
-        self.mapping[trk.id] = i
-    i = len(self.trackers)
-    for trk in reversed(self.trackers):
+        self.trackers[self.tracker_id] = trk
+        self.tracker_id += 1
+        #self.mapping[trk.id] = i
+    #i = len(self.trackers)
+    to_del = []
+    for trk_key in reversed(self.trackers.keys()):
+        trk = self.trackers[trk_key]
         d = trk.get_state()[0]
         if (trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits):
-          ret.append(np.concatenate((d,[trk.id, self.mapping[trk.id]])).reshape(1,-1))
-        i -= 1
+          ret.append(np.concatenate((d,[trk.id+1])).reshape(1,-1))
+        #i -= 1
         # remove dead tracklet
         if(trk.time_since_update > self.max_age):
-          self.trackers.pop(i)
+          to_del.append(trk_key)
+    for i in to_del:
+      self.trackers.pop(i, None)
     if(len(ret)>0):
       return np.concatenate(ret)
     return np.empty((0,5))

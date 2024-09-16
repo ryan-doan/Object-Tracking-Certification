@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import auto_LiRPA
 import math
+import cv2
 
 def convert_bbox_to_z(bbox):
   """
@@ -75,12 +76,27 @@ kf.model.Q[2,2] = 50
 kf.model.Q[-1,-1] = 50
 kf.x.data[:4] = data[0]
 
-#predict
-total_dist = 0
-for i in range(len(label)):
-  kf.predict()
-  total_dist += compute_l2_dist(kf.x, label[i])
-  print(f'Prediction: {kf.x[0]}, {kf.x[1]}; Actual: {label[i][0]}, {label[i][1]}')
-  kf.update(label[i])
+kf_control = KalmanFilter(dim_x=7, dim_z=4) 
+kf_control.model.F = torch.tensor(np.array([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],  [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]]))
+kf_control.model.H = torch.tensor(np.array([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]]))
 
-print(f'Average distance between prediction and label: {total_dist/len(label)}')
+kf_control.model.R[2:,2:] = kf_control.model.R[2:,2:] * 10.
+kf_control.model.P[4:,4:] = kf_control.model.P[4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
+kf_control.model.P *= 10.
+#self.kf.Q[-1,-1].assign(self.kf.Q[-1,-1] * 0.01)
+#self.kf.Q[4:,4:].assign(self.kf.Q[4:,4:] * 0.01)
+kf_control.model.Q[2,2] = 50
+kf_control.model.Q[-1,-1] = 50
+kf_control.x.data[:4] = data[0]
+
+kf_control.predict()
+kf.predict()
+kf.update(data[0])
+
+pass
+  
+
+#print(f'Average distance between prediction and label: {total_dist/len(label)}')
+
+
+#lirpa_model = auto_LiRPA.BoundedModule(kf, (data[0]))

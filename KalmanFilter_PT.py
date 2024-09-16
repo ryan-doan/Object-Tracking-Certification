@@ -46,7 +46,8 @@ class KalmanFilterModule(nn.Module):
 
         self.inv = torch.inverse
 
-    def forward(self, x, z=None):
+    def forward(self, x, z=None, R=None, H=None):
+        self.update(x, z, R, H)
         return self.predict(x)
 
     def predict(self, x, u=None, B=None, F=None, Q=None):
@@ -83,7 +84,7 @@ class KalmanFilterModule(nn.Module):
             self.x_post = x.detach().clone()
             self.P_post = self.P.detach().clone()
             self.y = torch.zeros((self.dim_z, 1))
-            return
+            return x
         
         if R is None:
             R = self.R
@@ -148,6 +149,9 @@ class KalmanFilter():
     def update(self, z, R=None, H=None):
         self.x = self.model.update(self.x, z, R, H)
         pass
+
+    def lazy_update_and_predict(self, z=None, R=None, H=None):
+        self.x = self.model(self.x, z, R=None, H=None)
 
     def __str__(self):
         return f'P: {self.model.P}\n' +\
