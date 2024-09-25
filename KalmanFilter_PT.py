@@ -1,10 +1,12 @@
 import torch
+import auto_LiRPA
 from torch import nn, Tensor
 import sys
 from math import log
 from numpy import isscalar
 from copy import deepcopy
 from filterpy.common import reshape_z
+import numpy as np
 
 class KalmanFilterModule(nn.Module):
     def __init__(self, dim_x, dim_z, dim_u=0):
@@ -46,8 +48,8 @@ class KalmanFilterModule(nn.Module):
 
         self.inv = torch.inverse
 
-    def forward(self, x, z=None):
-        return self.predict(x)
+    def forward(self, x, z):
+        return self.update(x, z)
 
     def predict(self, x, u=None, B=None, F=None, Q=None):
         if B is None:
@@ -72,7 +74,7 @@ class KalmanFilterModule(nn.Module):
 
         return x
 
-    def update(self, x, z, R=None, H=None):
+    def update(self, x, z):
         self._log_likelihood = None
         self._likelihood = None
         self._mahalanobis = None
@@ -85,14 +87,14 @@ class KalmanFilterModule(nn.Module):
             self.y = torch.zeros((self.dim_z, 1))
             return
         
-        if R is None:
-            R = self.R
-        elif isscalar(R):
-            R = torch.matmul(torch.eye(self.dim_z), R)
+        #if R is None:
+        R = self.R
+        #elif isscalar(R):
+            #R = torch.matmul(torch.eye(self.dim_z), R)
 
-        if H is None:
-            z = torch.tensor(self._reshape_z(z, self.dim_z, self.dim_x))
-            H = self.H.to(torch.float32)
+        #if H is None:
+        z = torch.tensor(self._reshape_z(z, self.dim_z, self.dim_x))
+        H = self.H.to(torch.float32)
 
         self.y = z - torch.matmul(H, x)
 
@@ -140,14 +142,39 @@ class KalmanFilter():
         self.x_prior = self.x.clone()
         self.x_post = self.x.clone()
         self.model = KalmanFilterModule(dim_x, dim_z, dim_u)
+        self.lirpa_x = None
+        self.lirpa_model = None
+        self.lirpa_initialized = False
+        self.eps = 0
+        
+    def initialize_lirpa(self, eps=0, device='cpu'):
+        self.eps = eps
+        self.lirpa_initialized = True
+        ptb = auto_LiRPA.PerturbationLpNorm(eps=self.eps, norm=np.inf)
+        self.lirpa_x = auto_LiRPA.BoundedTensor(self.x, ptb)
+        self.lirpa_model = auto_LiRPA.BoundedModule(self.model,\
+            (torch.zeros(self.x.shape), torch.zeros((self.model.dim_z, 1))),\
+            bound_opts={'conv_mode': 'matrix'}, device=device)
 
     def predict(self):
-        self.x = self.model(self.x)
+        self.x = self.model.predict(self.x)
         self.x_prior = self.x.clone()
 
-    def update(self, z, R=None, H=None):
-        self.x = self.model.update(self.x, z, R, H)
+    def update(self, z):
+        self.x = self.model(self.x, z)
         pass
+
+    def compute_prev_bounds(self, z):
+        if not self.lirpa_initialized:
+            print("Lirpa not initialized to most recent state.")
+            return
+        ptb = auto_LiRPA.PerturbationLpNorm(eps=self.eps, norm=np.inf)
+        z = auto_LiRPA.BoundedTensor(z, ptb)
+        self.lirpa_x = self.lirpa_model(self.lirpa_x, z)
+        lb, ub = self.lirpa_model.compute_bounds(method='ibp')
+        self.lirpa_initialized = False
+        print(ub)
+        print(lb)
 
     def __str__(self):
         return f'P: {self.model.P}\n' +\

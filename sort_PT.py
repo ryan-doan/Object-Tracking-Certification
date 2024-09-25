@@ -28,7 +28,7 @@ from skimage import io
 import glob
 import time
 import argparse
-from KalmanFilter_PT import KalmanFilter
+from KalmanFilterRevised import KalmanFilter
 import copy
 import torch
 
@@ -108,16 +108,17 @@ class KalmanBoxTracker(object):
     """
     #define constant velocity model
     self.kf = KalmanFilter(dim_x=7, dim_z=4) 
-    self.kf.model.F = torch.tensor([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],  [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]])
-    self.kf.model.H = torch.tensor([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]])
+    self.kf.predict_module.F = torch.tensor([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],\
+                                    [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]], dtype=torch.float32)
+    self.kf.update_module.H = torch.tensor([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]], dtype=torch.float32)
 
-    self.kf.model.R[2:,2:] = self.kf.model.R[2:,2:] * 10.
-    self.kf.model.P[4:,4:] = self.kf.model.P[4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
-    self.kf.model.P *= 10.
+    self.kf.update_module.R[2:,2:] = self.kf.update_module.R[2:,2:] * 10.
+    self.kf.P[4:,4:] = self.kf.P[4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
+    self.kf.P *= 10.
     #self.kf.Q[-1,-1].assign(self.kf.Q[-1,-1] * 0.01)
     #self.kf.Q[4:,4:].assign(self.kf.Q[4:,4:] * 0.01)
-    self.kf.model.Q[2,2] = 50
-    self.kf.model.Q[-1,-1] = 50
+    self.kf.predict_module.Q[2,2] = 50
+    self.kf.predict_module.Q[-1,-1] = 50
     #self.kf.model.Q[-1,-1] *= 0.01
     #self.kf.model.Q[4:,4:] *= 0.01
 
