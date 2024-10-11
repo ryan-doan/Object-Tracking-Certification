@@ -47,7 +47,7 @@ class KalmanFilterUpdate(nn.Module):
         PHT = torch.matmul(P, torch.transpose(self.H, 0, 1))
 
         S = torch.matmul(self.H, PHT) + self.R
-        SI = self._Iz
+        SI = self.inv(S)
 
         K = torch.matmul(PHT, SI)
 
@@ -61,7 +61,7 @@ class KalmanFilterUpdate(nn.Module):
         return torch.cat((x.T, P))
     
     def _neumann_inverse_method(self, S):
-        a = 0.09
+        a = 0.001
         SI = self._Iz
 
         for i in range(1, self.level_of_approximation):
@@ -146,10 +146,10 @@ class KalmanFilter():
         self.P.requires_grad_()
         self.lirpa_initialized = True
         self.predict_module = auto_LiRPA.BoundedModule(self.predict_module, \
-                                                       global_input=(torch.zeros_like(self.x), torch.zeros_like(self.P)),\
+                                                       global_input=(self.x, self.P),\
                                                         device="cpu")
         self.update_module = auto_LiRPA.BoundedModule(self.update_module, \
-                                                      global_input=(torch.zeros_like(self.x), torch.zeros_like(self.z), torch.zeros_like(self.P)),\
+                                                      global_input=(self.x, self.z, self.P),\
                                                         device="cpu")
 
     def compute_prev_bounds_update(self):
