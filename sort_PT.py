@@ -108,21 +108,21 @@ class KalmanBoxTracker(object):
     """
     #define constant velocity model
     self.kf = KalmanFilter(dim_x=7, dim_z=4) 
-    self.kf.predict_module.F = torch.tensor([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],\
-                                    [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]], dtype=torch.float32)
-    self.kf.update_module.H = torch.tensor([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]], dtype=torch.float32)
+    self.kf.predict_module.F = torch.tensor([[[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],\
+                                    [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]]], dtype=torch.float32)
+    self.kf.update_module.H = torch.tensor([[[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]]], dtype=torch.float32)
 
-    self.kf.update_module.R[2:,2:] = self.kf.update_module.R[2:,2:] * 10.
-    self.kf.P[4:,4:] = self.kf.P[4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
+    self.kf.update_module.R[:, 2:,2:] = self.kf.update_module.R[:, 2:,2:] * 10.
+    self.kf.P[:, 4:,4:] = self.kf.P[:, 4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
     self.kf.P *= 10.
     #self.kf.Q[-1,-1].assign(self.kf.Q[-1,-1] * 0.01)
     #self.kf.Q[4:,4:].assign(self.kf.Q[4:,4:] * 0.01)
-    self.kf.predict_module.Q[2,2] = 50
-    self.kf.predict_module.Q[-1,-1] = 50
+    self.kf.predict_module.Q[:, 2,2] = 50
+    self.kf.predict_module.Q[:, -1,-1] = 50
     #self.kf.model.Q[-1,-1] *= 0.01
     #self.kf.model.Q[4:,4:] *= 0.01
 
-    self.kf.x.data[:4] = convert_bbox_to_z(bbox)
+    self.kf.x.data[:, :4] = convert_bbox_to_z(bbox)
     self.time_since_update = 0
     self.id = KalmanBoxTracker.count
     KalmanBoxTracker.count += 1
@@ -139,27 +139,27 @@ class KalmanBoxTracker(object):
     self.history = []
     self.hits += 1
     self.hit_streak += 1
-    self.kf.update(convert_bbox_to_z(bbox))
+    self.kf.update(convert_bbox_to_z(bbox).unsqueeze(0))
 
   def predict(self):
     """
     Advances the state vector and returns the predicted bounding box estimate.
     """
-    if((self.kf.x[6]+self.kf.x[2])<=0):
-      self.kf.x[6] = 0.0
+    if((self.kf.x[0, 6]+self.kf.x[0, 2])<=0):
+      self.kf.x[0, 6] = 0.0
     self.kf.predict()
     self.age += 1
     if(self.time_since_update>0):
       self.hit_streak = 0
     self.time_since_update += 1
-    self.history.append(convert_x_to_bbox(self.kf.x))
+    self.history.append(convert_x_to_bbox(self.kf.x[0]))
     return self.history[-1]
 
   def get_state(self):
     """
     Returns the current bounding box estimate.
     """
-    return convert_x_to_bbox(self.kf.x)
+    return convert_x_to_bbox(self.kf.x[0])
 
   # Helper function to aid the attack
   def predict_no_trace(self):

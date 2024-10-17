@@ -65,31 +65,32 @@ if __name__ == '__main__':
 
     #define constant velocity model
     kf = KalmanFilter(dim_x=7, dim_z=4) 
-    kf.predict_module.F = torch.tensor([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],\
-                                    [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]], dtype=torch.float32)
-    kf.update_module.H = torch.tensor([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]], dtype=torch.float32)
+    kf.predict_module.F = torch.tensor([[[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],\
+                                    [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]]], dtype=torch.float32)
+    kf.update_module.H = torch.tensor([[[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]]], dtype=torch.float32)
 
-    kf.update_module.R[2:,2:] = kf.update_module.R[2:,2:] * 10.
-    kf.P[4:,4:] = kf.P[4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
+    kf.update_module.R[:, 2:,2:] = kf.update_module.R[:, 2:,2:] * 10.
+    kf.P[:, 4:,4:] = kf.P[:, 4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
     kf.P *= 10.
     #self.kf.Q[-1,-1].assign(self.kf.Q[-1,-1] * 0.01)
     #self.kf.Q[4:,4:].assign(self.kf.Q[4:,4:] * 0.01)
-    kf.predict_module.Q[2,2] = 50
-    kf.predict_module.Q[-1,-1] = 50
+    kf.predict_module.Q[:, 2,2] = 50
+    kf.predict_module.Q[:, -1,-1] = 50
     #self.kf.model.Q[-1,-1] *= 0.01
     #self.kf.model.Q[4:,4:] *= 0.01
-    kf.x.data[:4] = data[0]
+    kf.x.data[:, :4] = data[0]
     kf.initialize_lirpa()
 
     #predict
     total_dist = 0
     #for i in range(len(label)):
     kf.predict()
-    total_dist += compute_l2_dist(kf.x, label[0])
+    #kf.compute_prev_bounds_predict()
+    #total_dist += compute_l2_dist(kf.x, label[0])
     #print(f'Prediction: {kf.x[0]}, {kf.x[1]}; Actual: {label[i][0]}, {label[i][1]}')
     #kf.initialize_lirpa()
-    kf.update(label[0])
+    kf.update(label[0].reshape((1, 4, 1)))
     kf.compute_prev_bounds_update()
     #print(f'KF: {kf.x} Lirpa: {kf.lirpa_x}')
 
-    print(f'Average distance between prediction and label: {total_dist/len(label)}')
+    #print(f'Average distance between prediction and label: {total_dist/len(label)}')
