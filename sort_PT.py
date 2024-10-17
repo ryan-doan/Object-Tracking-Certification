@@ -28,7 +28,7 @@ from skimage import io
 import glob
 import time
 import argparse
-from KalmanFilterRevised import KalmanFilter
+from KalmanFilter_PT import KalmanFilter
 import copy
 import torch
 
@@ -123,6 +123,7 @@ class KalmanBoxTracker(object):
     #self.kf.model.Q[4:,4:] *= 0.01
 
     self.kf.x.data[:, :4] = convert_bbox_to_z(bbox)
+    self.kf.initialize_lirpa()
     self.time_since_update = 0
     self.id = KalmanBoxTracker.count
     KalmanBoxTracker.count += 1
