@@ -182,6 +182,8 @@ class KalmanFilter():
         out = self.predict_module(self.x, self.P)
         self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
         self.P = out[:, 1:]
+        if self.lirpa_initialized:
+            self._compute_prev_bounds_predict()
         return self.x[0]
     
     def update(self, z):
@@ -201,6 +203,8 @@ class KalmanFilter():
         out = self.update_module(self.x, z, self.P)
         self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
         self.P = out[:, 1:]
+        if self.lirpa_initialized:
+            self._compute_prev_bounds_update()
         return self.x[0]
 
     def initialize_lirpa(self, eps = 0.1):
@@ -216,11 +220,8 @@ class KalmanFilter():
                                                       global_input=(self.x, self.z, self.P),\
                                                         device="cpu")
 
-    def compute_prev_bounds_predict(self):
-        if not self.lirpa_initialized:
-            print('Lirpa not initialized')
-            return
-        lb, ub = self.predict_module.compute_bounds(method='ibp')
+    def _compute_prev_bounds_predict(self, method='ibp'):
+        lb, ub = self.predict_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
         self.x_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))
@@ -228,11 +229,8 @@ class KalmanFilter():
         self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
         self.P_u = ub[:, 1:]
 
-    def compute_prev_bounds_update(self):
-        if not self.lirpa_initialized:
-            print('Lirpa not initialized')
-            return
-        lb, ub = self.predict_module.compute_bounds(method='ibp')
+    def _compute_prev_bounds_update(self, method='ibp'):
+        lb, ub = self.update_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
         self.x_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))

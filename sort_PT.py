@@ -102,6 +102,7 @@ class KalmanBoxTracker(object):
   This class represents the internal state of individual tracked objects observed as bbox.
   """
   count = 0
+  bounds_out_file = None
   def __init__(self,bbox):
     """
     Initialises a tracker using initial bounding box.
@@ -155,6 +156,15 @@ class KalmanBoxTracker(object):
     self.time_since_update += 1
     self.history.append(convert_x_to_bbox(self.kf.x[0]))
     return self.history[-1]
+  
+  def record_bounds(self, frame):
+    #Write to bounds_out_file with format: "frame, id, x_l, x_u"
+    if self.bounds_out_file != None and self.kf.x_l != None and self.kf.x_u != None:
+      x_l = convert_x_to_bbox(self.kf.x_l[0]).squeeze()
+      x_u = convert_x_to_bbox(self.kf.x_u[0]).squeeze()
+      self.bounds_out_file.write(f'{frame}, {self.id}, \
+                                {", ".join("{:.4f}".format(x) for x in x_l.tolist())}, \
+                                {", ".join("{:.4f}".format(x) for x in x_u.tolist())}\n')
 
   def get_state(self):
     """
@@ -280,6 +290,7 @@ class Sort(object):
     for trk in reversed(self.trackers):
         d = trk.get_state()[0]
         if (trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits):
+          trk.record_bounds(self.frame_count)
           ret.append(np.concatenate((d,[trk.id, self.mapping[trk.id]])).reshape(1,-1))
         i -= 1
         # remove dead tracklet
@@ -342,6 +353,8 @@ if __name__ == '__main__':
     seq_dets = np.loadtxt(seq_dets_fn, delimiter=',')
     seq = seq_dets_fn[pattern.find('*'):].split(os.path.sep)[0]
     
+    bounds_out_file = open(os.path.join('output', '%s_bounds_data.txt'%(seq)), "w")
+    KalmanBoxTracker.bounds_out_file = bounds_out_file
     with open(os.path.join('output', '%s.txt'%(seq)),'w') as out_file:
       print("Processing %s."%(seq))
       for frame in range(int(seq_dets[:,0].max())):
@@ -371,5 +384,7 @@ if __name__ == '__main__':
           fig.canvas.flush_events()
           plt.draw()
           ax1.cla()
+    
+    bounds_out_file.close()
 
   print("Total Tracking took: %.3f seconds for %d frames or %.1f FPS" % (total_time, total_frames, total_frames / total_time))
