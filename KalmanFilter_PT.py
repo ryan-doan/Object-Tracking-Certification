@@ -168,15 +168,16 @@ class KalmanFilter():
         self.update_module = KalmanFilterUpdate(dim_x, dim_z)
 
     def predict(self):
-        if self.x_l == None:
-            ptb = auto_LiRPA.PerturbationLpNorm(0, np.inf)
-            self.x = auto_LiRPA.BoundedTensor(self.x, ptb)
-            self.P = auto_LiRPA.BoundedTensor(self.P, ptb)
-        else:
-            ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_u)
-            ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
-            self.x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
-            self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
+        if self.lirpa_initialized:
+            if self.x_l == None:
+                ptb = auto_LiRPA.PerturbationLpNorm(0, np.inf)
+                self.x = auto_LiRPA.BoundedTensor(self.x, ptb)
+                self.P = auto_LiRPA.BoundedTensor(self.P, ptb)
+            else:
+                ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_u)
+                ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
+                self.x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
+                self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
         
         #self.x, self.P = self.predict_module(self.x, self.P)
         out = self.predict_module(self.x, self.P)
@@ -187,17 +188,22 @@ class KalmanFilter():
         return self.x[0]
     
     def update(self, z):
-        ptb_z = auto_LiRPA.PerturbationLpNorm(self.initial_eps, np.inf)
-        z = auto_LiRPA.BoundedTensor(z, ptb_z)
-        if self.x_l == None:
-            zero_ptb = auto_LiRPA.PerturbationLpNorm(0, np.inf)
-            self.x = auto_LiRPA.BoundedTensor(self.x, zero_ptb)
-            self.P = auto_LiRPA.BoundedTensor(self.P, zero_ptb)
-        else:
-            ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_u)
-            ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
-            self.x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
-            self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
+        if self.lirpa_initialized:
+            z_l = z.detach().clone()
+            z_u = z.detach().clone()
+            z_u[:, :2] += self.initial_eps
+            z_l[:, :2] -= self.initial_eps
+            ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L=z_l, x_U=z_u)
+            z = auto_LiRPA.BoundedTensor(z, ptb_z)
+            if self.x_l == None:
+                zero_ptb = auto_LiRPA.PerturbationLpNorm(0, np.inf)
+                self.x = auto_LiRPA.BoundedTensor(self.x, zero_ptb)
+                self.P = auto_LiRPA.BoundedTensor(self.P, zero_ptb)
+            else:
+                ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_u)
+                ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
+                self.x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
+                self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
         
         #self.x, self.z, self.P = self.update_module(self.x, z, self.P)
         out = self.update_module(self.x, z, self.P)

@@ -76,7 +76,7 @@ def convert_bbox_to_z(bbox):
   h = bbox[3] - bbox[1]
   x = bbox[0] + w/2.
   y = bbox[1] + h/2.
-  s = w * h    #scale is just area
+  s = w * h   #scale is just area
   r = w / float(h)
   #return tf.convert_to_tensor(np.array([x, y, s, r]).reshape((4, 1)), dtype=tf.float32)
   z = torch.tensor([[x],[y],[s],[r]], requires_grad=True, dtype=torch.float32)
@@ -162,9 +162,9 @@ class KalmanBoxTracker(object):
     if self.bounds_out_file != None and self.kf.x_l != None and self.kf.x_u != None:
       x_l = convert_x_to_bbox(self.kf.x_l[0]).squeeze()
       x_u = convert_x_to_bbox(self.kf.x_u[0]).squeeze()
-      self.bounds_out_file.write(f'{frame}, {self.id}, \
-                                {", ".join("{:.4f}".format(x) for x in x_l.tolist())}, \
-                                {", ".join("{:.4f}".format(x) for x in x_u.tolist())}\n')
+      x_l_str = ", ".join("{:.4f}".format(x) for x in x_l.tolist())
+      x_u_str = ", ".join("{:.4f}".format(x) for x in x_u.tolist())
+      self.bounds_out_file.write(f'{frame}, {self.id}, {x_l_str}, {x_u_str}\n')
 
   def get_state(self):
     """
