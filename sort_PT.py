@@ -66,7 +66,7 @@ def iou_batch(bb_test, bb_gt):
   return(o)  
 
 
-def convert_bbox_to_z(bbox):
+def convert_bbox_to_z(bbox, device='cpu'):
   """
   Takes a bounding box in the form [x1,y1,x2,y2] and returns z in the form
     [x,y,s,r] where x,y is the centre of the box and s is the scale/area and r is
@@ -79,11 +79,11 @@ def convert_bbox_to_z(bbox):
   s = w * h   #scale is just area
   r = w / float(h)
   #return tf.convert_to_tensor(np.array([x, y, s, r]).reshape((4, 1)), dtype=tf.float32)
-  z = torch.tensor([[x],[y],[s],[r]], requires_grad=True, dtype=torch.float32)
+  z = torch.tensor([[x],[y],[s],[r]], requires_grad=True, dtype=torch.float32, device=device)
   return z.view(4, 1)
 
 
-def convert_x_to_bbox(x,score=None):
+def convert_x_to_bbox(x,score=None, device='cpu'):
   """
   Takes a bounding box in the centre form [x,y,s,r] and returns it in the form
     [x1,y1,x2,y2] where x1,y1 is the top left and x2,y2 is the bottom right
@@ -92,9 +92,9 @@ def convert_x_to_bbox(x,score=None):
   h = x[2] / w
   if(score==None):
     #return tf.convert_to_tensor(np.array([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.]).reshape((1,4)), dtype=tf.float32)
-    return torch.tensor([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.]).reshape(1,4)
+    return torch.tensor([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.], device=device).reshape(1,4)
   else:
-    return torch.tensor([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.,score]).reshape((1,5))
+    return torch.tensor([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.,score], device=device).reshape((1,5))
 
 
 class KalmanBoxTracker(object):
@@ -103,15 +103,16 @@ class KalmanBoxTracker(object):
   """
   count = 0
   bounds_out_file = None
-  def __init__(self,bbox):
+  def __init__(self,bbox,device):
     """
     Initialises a tracker using initial bounding box.
     """
     #define constant velocity model
+    self.device = device
     self.kf = KalmanFilter(dim_x=7, dim_z=4) 
     self.kf.predict_module.F = torch.tensor([[[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],\
-                                    [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]]], dtype=torch.float32)
-    self.kf.update_module.H = torch.tensor([[[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]]], dtype=torch.float32)
+                                    [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]]], device=device, dtype=torch.float32)
+    self.kf.update_module.H = torch.tensor([[[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]]], device=device, dtype=torch.float32)
 
     self.kf.update_module.R[:, 2:,2:] = self.kf.update_module.R[:, 2:,2:] * 10.
     self.kf.P[:, 4:,4:] = self.kf.P[:, 4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
@@ -123,8 +124,7 @@ class KalmanBoxTracker(object):
     #self.kf.model.Q[-1,-1] *= 0.01
     #self.kf.model.Q[4:,4:] *= 0.01
 
-    self.kf.x.data[:, :4] = convert_bbox_to_z(bbox)
-    self.kf.initialize_lirpa()
+    self.kf.x.data[:, :4] = convert_bbox_to_z(bbox, device)
     self.time_since_update = 0
     self.id = KalmanBoxTracker.count
     KalmanBoxTracker.count += 1
@@ -132,6 +132,8 @@ class KalmanBoxTracker(object):
     self.hits = 0
     self.hit_streak = 0
     self.age = 0
+    self.bounds_out_data = []
+    self.kf.initialize_lirpa()
 
   def update(self,bbox):
     """
@@ -141,7 +143,7 @@ class KalmanBoxTracker(object):
     self.history = []
     self.hits += 1
     self.hit_streak += 1
-    self.kf.update(convert_bbox_to_z(bbox).unsqueeze(0))
+    self.kf.update(convert_bbox_to_z(bbox, self.device).unsqueeze(0))
 
   def predict(self):
     """
@@ -154,23 +156,28 @@ class KalmanBoxTracker(object):
     if(self.time_since_update>0):
       self.hit_streak = 0
     self.time_since_update += 1
-    self.history.append(convert_x_to_bbox(self.kf.x[0]))
+    self.history.append(convert_x_to_bbox(self.kf.x[0], device=self.device))
     return self.history[-1]
   
   def record_bounds(self, frame):
     #Write to bounds_out_file with format: "frame, id, x_l, x_u"
     if self.bounds_out_file != None and self.kf.x_l != None and self.kf.x_u != None:
-      x_l = convert_x_to_bbox(self.kf.x_l[0]).squeeze()
-      x_u = convert_x_to_bbox(self.kf.x_u[0]).squeeze()
+      x_l = convert_x_to_bbox(self.kf.x_l[0], device=self.device).squeeze()
+      x_u = convert_x_to_bbox(self.kf.x_u[0], device=self.device).squeeze()
       x_l_str = ", ".join("{:.4f}".format(x) for x in x_l.tolist())
       x_u_str = ", ".join("{:.4f}".format(x) for x in x_u.tolist())
-      self.bounds_out_file.write(f'{frame}, {self.id}, {x_l_str}, {x_u_str}\n')
+      self.bounds_out_data.append(f'{frame}, {self.id}, {x_l_str}, {x_u_str}\n')
+    
+  def write_bounds(self):
+    if self.bounds_out_file != None:
+      self.bounds_out_file.write("".join(self.bounds_out_data))
+      #self.bounds_out_file.write("\n")
 
   def get_state(self):
     """
     Returns the current bounding box estimate.
     """
-    return convert_x_to_bbox(self.kf.x[0])
+    return convert_x_to_bbox(self.kf.x[0], device='cpu')
 
   # Helper function to aid the attack
   def predict_no_trace(self):
@@ -178,12 +185,12 @@ class KalmanBoxTracker(object):
     if((tracker_temp.x[6]+tracker_temp.x[2])<=0):
       tracker_temp.x[6] = 0
     tracker_temp.predict()
-    return convert_x_to_bbox(tracker_temp.x)
+    return convert_x_to_bbox(tracker_temp.x, device=self.device)
 
   # Helper function to get prediction after some update, without actually updating the tracker
   def update_predict_no_trace(self,bbox):
     tracker_temp = copy.deepcopy(self.kf)
-    tracker_temp.update(convert_bbox_to_z(bbox))
+    tracker_temp.update(convert_bbox_to_z(bbox), self.device)
     tracker_temp.predict()
     #return convert_x_to_bbox(tracker_temp.x)
     return tracker_temp.x
@@ -240,7 +247,7 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
 
 
 class Sort(object):
-  def __init__(self, max_age=1, min_hits=3, iou_threshold=0.3):
+  def __init__(self, max_age=1, min_hits=3, iou_threshold=0.3, device='cpu'):
     """
     Sets key parameters for SORT
     """
@@ -250,6 +257,7 @@ class Sort(object):
     self.trackers = []
     self.frame_count = 0
     self.mapping = {} ## cwang: from trk.id to det row index
+    self.device = device
 
   def update(self, dets=np.empty((0, 5))):
     """
@@ -267,7 +275,7 @@ class Sort(object):
     ret = []
     #mapping = {} ## yman: from trk.id to det row index
     for t, trk in enumerate(trks):
-      pos = self.trackers[t].predict()[0]
+      pos = self.trackers[t].predict()[0].to('cpu')
       trk[:] = [pos[0], pos[1], pos[2], pos[3], 0]
       if torch.any(torch.isnan(pos)):
         to_del.append(t)
@@ -283,7 +291,7 @@ class Sort(object):
 
     # create and initialise new trackers for unmatched detections
     for i in unmatched_dets:
-        trk = KalmanBoxTracker(dets[i,:])
+        trk = KalmanBoxTracker(dets[i,:], device=self.device)
         self.trackers.append(trk)
         self.mapping[trk.id] = i
     i = len(self.trackers)
@@ -295,6 +303,7 @@ class Sort(object):
         i -= 1
         # remove dead tracklet
         if(trk.time_since_update > self.max_age):
+          trk.write_bounds()
           self.trackers.pop(i)
     if(len(ret)>0):
       return np.concatenate(ret)
@@ -328,6 +337,7 @@ def parse_args():
     return args
 
 if __name__ == '__main__':
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   # all train
   args = parse_args()
   display = args.display
@@ -349,7 +359,8 @@ if __name__ == '__main__':
   for seq_dets_fn in glob.glob(pattern):
     mot_tracker = Sort(max_age=args.max_age, 
                        min_hits=args.min_hits,
-                       iou_threshold=args.iou_threshold) #create instance of the SORT tracker
+                       iou_threshold=args.iou_threshold,
+                       device=device) #create instance of the SORT tracker
     seq_dets = np.loadtxt(seq_dets_fn, delimiter=',')
     seq = seq_dets_fn[pattern.find('*'):].split(os.path.sep)[0]
     
@@ -367,7 +378,7 @@ if __name__ == '__main__':
           fn = os.path.join('mot_benchmark', phase, seq, 'img1', '%06d.jpg'%(frame))
           im =io.imread(fn)
           ax1.imshow(im)
-          plt.title(seq + ' Tracked Targets')
+          plt.title(seq + ' Tracked Targets ' + str(frame))
 
         start_time = time.time()
         trackers = mot_tracker.update(dets)
@@ -384,6 +395,9 @@ if __name__ == '__main__':
           fig.canvas.flush_events()
           plt.draw()
           ax1.cla()
+
+      for trk in mot_tracker.trackers:
+        trk.write_bounds()
     
     bounds_out_file.close()
 
