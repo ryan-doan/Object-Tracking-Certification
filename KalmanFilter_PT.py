@@ -227,7 +227,7 @@ class KalmanFilter():
                                                       global_input=(self.x, self.z, self.P),\
                                                         device="cpu")
 
-    def _compute_prev_bounds_predict(self, method='ibp'):
+    def _compute_prev_bounds_predict(self, method='crown-ibp'):
         lb, ub = self.predict_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
@@ -236,7 +236,7 @@ class KalmanFilter():
         self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
         self.P_u = ub[:, 1:]
 
-    def _compute_prev_bounds_update(self, method='ibp'):
+    def _compute_prev_bounds_update(self, method='crown-ibp'):
         lb, ub = self.update_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
