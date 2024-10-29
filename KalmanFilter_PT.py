@@ -88,7 +88,6 @@ class KalmanFilterUpdate(nn.Module):
         super(KalmanFilterUpdate, self).__init__()
         self.R = torch.eye(dim_z, dtype=torch.float32).unsqueeze(0)
         self.H = torch.zeros((dim_z, dim_x), dtype=torch.float32).unsqueeze(0)
-        self.HT = torch.transpose(self.H, 1, 2)
         self._Ix = torch.eye(dim_x, dtype=torch.float32).unsqueeze(0)
         self._Iz = torch.eye(dim_z, dtype=torch.float32).unsqueeze(0)
         self._zero_diagonal = torch.ones(dim_z, dim_z).fill_diagonal_(0)
@@ -107,7 +106,7 @@ class KalmanFilterUpdate(nn.Module):
         return torch.all(tensor[~diagonal_mask] == 0)
 
     def forward(self, x, z, P):
-        PHT = torch.matmul(P, self.HT)
+        PHT = torch.matmul(P, torch.transpose(self.H, 1, 2))
 
         S = torch.matmul(self.H, PHT) + self.R
         #SI = self.inv(S)
@@ -228,7 +227,7 @@ class KalmanFilter():
                                                       global_input=(self.x, self.z, self.P),\
                                                         device="cpu")
 
-    def _compute_prev_bounds_predict(self, method='backward'):
+    def _compute_prev_bounds_predict(self, method='ibp'):
         lb, ub = self.predict_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
@@ -237,7 +236,7 @@ class KalmanFilter():
         self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
         self.P_u = ub[:, 1:]
 
-    def _compute_prev_bounds_update(self, method='backward'):
+    def _compute_prev_bounds_update(self, method='ibp'):
         lb, ub = self.update_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
