@@ -162,9 +162,11 @@ class KalmanBoxTracker(object):
     if self.bounds_out_file != None and self.kf.x_l != None and self.kf.x_u != None:
       x_l = convert_x_to_bbox(self.kf.x_l[0]).squeeze()
       x_u = convert_x_to_bbox(self.kf.x_u[0]).squeeze()
+      x_pred = self.get_state().squeeze()
       x_l_str = ", ".join("{:.4f}".format(x) for x in x_l.tolist())
       x_u_str = ", ".join("{:.4f}".format(x) for x in x_u.tolist())
-      self.bounds_out_file.write(f'{frame}, {self.id}, {x_l_str}, {x_u_str}\n')
+      x_pred_str = ", ".join("{:.4f}".format(x) for x in x_pred.tolist())
+      self.bounds_out_file.write(f'{frame}, {self.id}, {x_l_str}, {x_u_str}, {x_pred_str}\n')
 
   def get_state(self):
     """
