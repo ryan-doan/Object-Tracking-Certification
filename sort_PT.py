@@ -132,6 +132,7 @@ class KalmanBoxTracker(object):
     self.hits = 0
     self.hit_streak = 0
     self.age = 0
+    self.bounds_out_data = []
 
   def update(self,bbox):
     """
@@ -156,7 +157,7 @@ class KalmanBoxTracker(object):
     self.time_since_update += 1
     self.history.append(convert_x_to_bbox(self.kf.x[0]))
     return self.history[-1]
-  
+
   def record_bounds(self, frame):
     #Write to bounds_out_file with format: "frame, id, x_l, x_u"
     if self.bounds_out_file != None and self.kf.x_l != None and self.kf.x_u != None:
@@ -166,7 +167,12 @@ class KalmanBoxTracker(object):
       x_l_str = ", ".join("{:.4f}".format(x) for x in x_l.tolist())
       x_u_str = ", ".join("{:.4f}".format(x) for x in x_u.tolist())
       x_pred_str = ", ".join("{:.4f}".format(x) for x in x_pred.tolist())
-      self.bounds_out_file.write(f'{frame}, {self.id}, {x_l_str}, {x_u_str}, {x_pred_str}\n')
+      self.bounds_out_data.append(f'{frame}, {self.id}, {x_l_str}, {x_u_str}, {x_pred_str}\n')
+    
+  def write_bounds(self):
+    if self.bounds_out_file != None:
+      self.bounds_out_file.write("".join(self.bounds_out_data))
+      self.bounds_out_file.flush()
 
   def get_state(self):
     """
@@ -297,6 +303,7 @@ class Sort(object):
         i -= 1
         # remove dead tracklet
         if(trk.time_since_update > self.max_age):
+          self.trackers[i].write_bounds()
           self.trackers.pop(i)
     if(len(ret)>0):
       return np.concatenate(ret)
@@ -386,6 +393,9 @@ if __name__ == '__main__':
           fig.canvas.flush_events()
           plt.draw()
           ax1.cla()
+
+      for trk in mot_tracker.trackers:
+        trk.write_bounds()
     
     bounds_out_file.close()
 
