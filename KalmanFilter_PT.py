@@ -105,7 +105,8 @@ class KalmanFilterUpdate(nn.Module):
         # Check if all non-diagonal elements are zero
         return torch.all(tensor[~diagonal_mask] == 0)
 
-    def forward(self, x, z, P):
+    def forward(self, x, z_coord, z_scale, z_ratio, P):
+        z = torch.cat((z_coord, z_scale, z_ratio), dim=1)
         PHT = torch.matmul(P, torch.transpose(self.H, 1, 2))
 
         S = torch.matmul(self.H, PHT) + self.R
@@ -191,17 +192,19 @@ class KalmanFilter():
         return self.x[0]
     
     def update(self, z):
+        z_coord = z[:, :2]
+        z_scale = z[:, 2:3]
+        z_ratio = z[:, 3:]
         if self.lirpa_initialized:
-            z_l = z.detach().clone()
-            z_u = z.detach().clone()
-            z_u[:, :2] += self.initial_eps
-            z_l[:, :2] -= self.initial_eps
+            zero_ptb_l2norm = auto_LiRPA.PerturbationLpNorm(norm=2, eps=0)
             if self.countdown == 0:
-                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L=z_l, x_U=z_u)
+                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=2, eps=self.initial_eps)
             else:
-                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, eps=0)
+                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=2, eps=0)
             self.countdown -= 1
-            z = auto_LiRPA.BoundedTensor(z, ptb_z)
+            z_coord = auto_LiRPA.BoundedTensor(z_coord, ptb_z)
+            z_scale = auto_LiRPA.BoundedTensor(z_scale, zero_ptb_l2norm)
+            z_ratio = auto_LiRPA.BoundedTensor(z_ratio, zero_ptb_l2norm)
             if self.x_l == None:
                 zero_ptb = auto_LiRPA.PerturbationLpNorm(0, np.inf)
                 self.x = auto_LiRPA.BoundedTensor(self.x, zero_ptb)
@@ -213,7 +216,7 @@ class KalmanFilter():
                 self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
         
         #self.x, self.z, self.P = self.update_module(self.x, z, self.P)
-        out = self.update_module(self.x, z, self.P)
+        out = self.update_module(self.x, z_coord, z_scale, z_ratio, self.P)
         self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
         self.P = out[:, 1:]
         if self.lirpa_initialized:
@@ -222,15 +225,20 @@ class KalmanFilter():
 
     def initialize_lirpa(self, eps = 10):
         self.x.requires_grad_()
-        self.z.requires_grad_()
         self.P.requires_grad_()
+        z_coord = self.z[:, :2].detach().clone()
+        z_scale = self.z[:, 2:3].detach().clone()
+        z_ratio = self.z[:, 3:].detach().clone()
+        z_coord.requires_grad_()
+        z_scale.requires_grad_()
+        z_ratio.requires_grad_()
         self.lirpa_initialized = True
         self.initial_eps = eps
         self.predict_module = auto_LiRPA.BoundedModule(self.predict_module, \
                                                        global_input=(self.x, self.P),\
                                                         device="cpu")
         self.update_module = auto_LiRPA.BoundedModule(self.update_module, \
-                                                      global_input=(self.x, self.z, self.P),\
+                                                      global_input=(self.x, z_coord, z_scale, z_ratio, self.P),\
                                                         device="cpu")
 
     def _compute_prev_bounds_predict(self, method='crown-ibp'):
