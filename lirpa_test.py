@@ -1,4 +1,4 @@
-from PyTorch_Kalman.KalmanFilter_PT import KalmanFilter
+from KalmanFilter_PT import KalmanFilter
 import numpy as np
 import torch
 import auto_LiRPA
@@ -90,7 +90,8 @@ if __name__ == '__main__':
     #print(f'Prediction: {kf.x[0]}, {kf.x[1]}; Actual: {label[i][0]}, {label[i][1]}')
     #kf.initialize_lirpa()
     kf.update(label[0].reshape((1, 4, 1)))
-    kf.compute_prev_bounds_update()
-    #print(f'KF: {kf.x} Lirpa: {kf.lirpa_x}')
+    #kf.compute_prev_bounds_update()
+    print(kf.x_l)
+    print(kf.x_u)
 
     #print(f'Average distance between prediction and label: {total_dist/len(label)}')

@@ -10,7 +10,7 @@ import argparse
 def parse_args():
     parser = argparse.ArgumentParser(description='Bounds visualize')
     parser.add_argument("-bounds-file", help="File with bounds data.", type=str,
-                        default='C:\\Users\\doann\\Documents\\lirpa\\PyTorch_Kalman\\output\\visualize\\ibp.txt')
+                        default='C:\\Users\\doann\\Documents\\lirpa\\PyTorch_Kalman\\output\\visualize\\crown-ibp-new-ptb.txt')
     parser.add_argument("-img", help="Image to overlay the bounds.", type=str, 
                         default='C:\\Users\\doann\\Documents\\lirpa\\PyTorch_Kalman\\mot_benchmark\\train\\ADL-Rundle-6\\img1')
     return parser.parse_args()

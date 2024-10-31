@@ -168,6 +168,8 @@ class KalmanFilter():
         self.predict_module = KalmanFilterPredict(dim_x)
         self.update_module = KalmanFilterUpdate(dim_x, dim_z)
 
+        self.countdown = 5
+
     def predict(self):
         if self.lirpa_initialized:
             if self.x_l == None:
@@ -194,7 +196,11 @@ class KalmanFilter():
             z_u = z.detach().clone()
             z_u[:, :2] += self.initial_eps
             z_l[:, :2] -= self.initial_eps
-            ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L=z_l, x_U=z_u)
+            if self.countdown == 0:
+                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L=z_l, x_U=z_u)
+            else:
+                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, eps=0)
+            self.countdown -= 1
             z = auto_LiRPA.BoundedTensor(z, ptb_z)
             if self.x_l == None:
                 zero_ptb = auto_LiRPA.PerturbationLpNorm(0, np.inf)
@@ -214,7 +220,7 @@ class KalmanFilter():
             self._compute_prev_bounds_update()
         return self.x[0]
 
-    def initialize_lirpa(self, eps = 0.1):
+    def initialize_lirpa(self, eps = 10):
         self.x.requires_grad_()
         self.z.requires_grad_()
         self.P.requires_grad_()

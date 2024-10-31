@@ -86,7 +86,7 @@ if __name__ == "__main__":
     
     y = lirpa_model(x)
     y_true = torch.inverse(x)
-    lb, ub = lirpa_model.compute_bounds()
+    lb, ub = lirpa_model.compute_bounds(method='forward')
     print(lb)
     print(ub)
     pass

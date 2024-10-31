@@ -118,10 +118,10 @@ class KalmanBoxTracker(object):
     self.kf.P *= 10.
     #self.kf.Q[-1,-1].assign(self.kf.Q[-1,-1] * 0.01)
     #self.kf.Q[4:,4:].assign(self.kf.Q[4:,4:] * 0.01)
-    self.kf.predict_module.Q[:, 2,2] = 50
-    self.kf.predict_module.Q[:, -1,-1] = 50
-    #self.kf.model.Q[-1,-1] *= 0.01
-    #self.kf.model.Q[4:,4:] *= 0.01
+    #self.kf.predict_module.Q[:, 2,2] = 50
+    #self.kf.predict_module.Q[:, -1,-1] = 50
+    self.kf.predict_module.Q[-1,-1] *= 0.01
+    self.kf.predict_module.Q[4:,4:] *= 0.01
 
     self.kf.x.data[:, :4] = convert_bbox_to_z(bbox)
     self.kf.initialize_lirpa()
