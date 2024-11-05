@@ -108,20 +108,20 @@ class KalmanBoxTracker(object):
     Initialises a tracker using initial bounding box.
     """
     #define constant velocity model
-    self.kf = KalmanFilter(dim_x=7, dim_z=4) 
-    self.kf.predict_module.F = torch.tensor([[[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],\
-                                    [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]]], dtype=torch.float32)
-    self.kf.update_module.H = torch.tensor([[[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]]], dtype=torch.float32)
+    self.kf = KalmanFilter(dim_x=7, dim_z=4, id = KalmanBoxTracker.count) 
+    self.kf.predict_module.F = torch.tensor([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],\
+                                    [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]], dtype=torch.float32)
+    self.kf.update_module.H = torch.tensor([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]], dtype=torch.float32)
 
-    self.kf.update_module.R[:, 2:,2:] = self.kf.update_module.R[:, 2:,2:] * 10.
+    self.kf.update_module.R[2:,2:] = self.kf.update_module.R[2:,2:] * 10.
     self.kf.P[:, 4:,4:] = self.kf.P[:, 4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
     self.kf.P *= 10.
     #self.kf.Q[-1,-1].assign(self.kf.Q[-1,-1] * 0.01)
     #self.kf.Q[4:,4:].assign(self.kf.Q[4:,4:] * 0.01)
-    #self.kf.predict_module.Q[:, 2,2] = 50
-    #self.kf.predict_module.Q[:, -1,-1] = 50
-    self.kf.predict_module.Q[-1,-1] *= 0.01
-    self.kf.predict_module.Q[4:,4:] *= 0.01
+    self.kf.predict_module.Q[2,2] = 50
+    self.kf.predict_module.Q[-1,-1] = 50
+    #self.kf.predict_module.Q[-1,-1] *= 0.01
+    #self.kf.predict_module.Q[4:,4:] *= 0.01
 
     self.kf.x.data[:, :4] = convert_bbox_to_z(bbox)
     self.kf.initialize_lirpa()

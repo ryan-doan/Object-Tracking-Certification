@@ -43,35 +43,20 @@ class InverseModule(nn.Module):
         flipped_matrix = torch.cat((torch.cat((d, -b), 2), torch.cat((-c, a), 2)), 1)
 
         return (1/det) * flipped_matrix
-    
-class TwoByTwoInverseModule(nn.Module):
-    def __init__(self):
-        super(TwoByTwoInverseModule, self).__init__()
-
-    def forward(self, x):
-        a = x[:, :1, :1]
-        b = x[:, :1, 1:]
-        c = x[:, 1:, :1]
-        d = x[:, 1:, 1:]
-        det = (a * d - b * c)
-        #x = self.P.matmul(x).matmul(self.P)
-        #x = x.matmul(self.P).transpose(-1, -2).matmul(self.P)
-        flipped_matrix = torch.cat((torch.cat((d, -b), 2), torch.cat((-c, a), 2)), 1)
-
-        return (1/det) * flipped_matrix
 
 class KalmanFilterPredict(nn.Module):
     def __init__(self, dim_x):
         super(KalmanFilterPredict, self).__init__()
         self._alpha_sq = 1.
-        self.Q = torch.eye(dim_x, dtype=torch.float32).unsqueeze(0)
-        self.F = torch.eye(dim_x, dtype=torch.float32).unsqueeze(0)
+        self.Q = torch.eye(dim_x, dtype=torch.float32)
+        self.F = torch.eye(dim_x, dtype=torch.float32)
         #self.Fx = nn.Linear(dim_x, dim_x, bias=False)
 
     def forward(self, x, P):
         #x = self.Fx(x)
-        x = torch.matmul(self.F, x)
-        P = self._alpha_sq * torch.matmul(torch.matmul(self.F, P), torch.transpose(self.F, 1, 2)) + self.Q
+        x = torch.matmul(x.transpose(1, 2), self.F.transpose(0, 1)).transpose(1, 2)
+        FP = torch.matmul(P.transpose(1, 2), self.F.transpose(0, 1)).transpose(1, 2)
+        P = self._alpha_sq * torch.matmul(FP, self.F.transpose(0, 1)) + self.Q
         return torch.cat((x.transpose(1, 2), P), dim=1)
 
     '''
@@ -86,10 +71,10 @@ class KalmanFilterPredict(nn.Module):
 class KalmanFilterUpdate(nn.Module):
     def __init__(self, dim_x, dim_z):
         super(KalmanFilterUpdate, self).__init__()
-        self.R = torch.eye(dim_z, dtype=torch.float32).unsqueeze(0)
-        self.H = torch.zeros((dim_z, dim_x), dtype=torch.float32).unsqueeze(0)
-        self._Ix = torch.eye(dim_x, dtype=torch.float32).unsqueeze(0)
-        self._Iz = torch.eye(dim_z, dtype=torch.float32).unsqueeze(0)
+        self.R = torch.eye(dim_z, dtype=torch.float32)
+        self.H = torch.zeros((dim_z, dim_x), dtype=torch.float32)
+        self._Ix = torch.eye(dim_x, dtype=torch.float32)
+        self._Iz = torch.eye(dim_z, dtype=torch.float32)
         self._zero_diagonal = torch.ones(dim_z, dim_z).fill_diagonal_(0)
         self.inv = InverseModule()
         self.level_of_approximation = 50
@@ -105,11 +90,11 @@ class KalmanFilterUpdate(nn.Module):
         # Check if all non-diagonal elements are zero
         return torch.all(tensor[~diagonal_mask] == 0)
 
-    def forward(self, x, z_coord, z_scale, z_ratio, P):
-        z = torch.cat((z_coord, z_scale, z_ratio), dim=1)
-        PHT = torch.matmul(P, torch.transpose(self.H, 1, 2))
+    def forward(self, x, z_x, z_y, z_scale, z_ratio, P):
+        z = torch.cat((z_x, z_y, z_scale, z_ratio), dim=1)
+        PHT = torch.matmul(P, self.H.transpose(0, 1))
 
-        S = torch.matmul(self.H, PHT) + self.R
+        S = torch.matmul(PHT.transpose(1, 2), self.H.transpose(0, 1)).transpose(1, 2) + self.R
         #SI = self.inv(S)
         # IMPORTANT! THIS IS JUST A WORKAROUND CURRENTLY! THIS INVERSE METHOD ONLY WORKS WITH DIAGONAL MATRICES (R and H must be diagonal)
         #SI = 1 / (self._zero_diagonal + S) - self._zero_diagonal
@@ -117,7 +102,7 @@ class KalmanFilterUpdate(nn.Module):
 
         K = torch.matmul(PHT, SI)
 
-        y = z - torch.matmul(self.H, x)
+        y = z - torch.matmul(x.transpose(1, 2), self.H.transpose(0, 1)).transpose(1, 2)
 
         x = x + torch.matmul(K, y)
 
@@ -143,7 +128,7 @@ class KalmanFilterUpdate(nn.Module):
         return SI * a
 
 class KalmanFilter():
-    def __init__(self, dim_x, dim_z, dim_u=0):
+    def __init__(self, dim_x, dim_z, id=0, dim_u=0):
         if dim_x < 1:
             raise ValueError('dim_x must be 1 or greater')
         if dim_z < 1:
@@ -154,11 +139,12 @@ class KalmanFilter():
         self.dim_x = dim_x
         self.dim_z = dim_z
         self.dim_u = dim_u
+        self.id = id
         self.lirpa_initialized = False
         #self.C = torch.concat(torch.eye(dim_x).unsqueeze(0), torch.zeros((1, dim_x)))
 
         self.x = torch.zeros((1, dim_x, 1), dtype=torch.float32)
-        self.P = torch.tensor(torch.eye(dim_x, dtype=torch.float32)).unsqueeze(0)
+        self.P = torch.eye(dim_x, dtype=torch.float32).unsqueeze(0)
         self.z = torch.zeros((1, dim_z, 1), dtype=torch.float32)
         
         self.x_l = None
@@ -169,7 +155,7 @@ class KalmanFilter():
         self.predict_module = KalmanFilterPredict(dim_x)
         self.update_module = KalmanFilterUpdate(dim_x, dim_z)
 
-        self.countdown = 5
+        self.countdown = 10
 
     def predict(self):
         if self.lirpa_initialized:
@@ -192,7 +178,8 @@ class KalmanFilter():
         return self.x[0]
     
     def update(self, z):
-        z_coord = z[:, :2]
+        z_x = z[:, :1]
+        z_y = z[:, 1:2]
         z_scale = z[:, 2:3]
         z_ratio = z[:, 3:]
         if self.lirpa_initialized:
@@ -202,21 +189,18 @@ class KalmanFilter():
             else:
                 ptb_z = auto_LiRPA.PerturbationLpNorm(norm=2, eps=0)
             self.countdown -= 1
-            z_coord = auto_LiRPA.BoundedTensor(z_coord, ptb_z)
+            z_x = auto_LiRPA.BoundedTensor(z_x, ptb_z)
+            z_y = auto_LiRPA.BoundedTensor(z_y, ptb_z)
             z_scale = auto_LiRPA.BoundedTensor(z_scale, zero_ptb_l2norm)
             z_ratio = auto_LiRPA.BoundedTensor(z_ratio, zero_ptb_l2norm)
-            if self.x_l == None:
-                zero_ptb = auto_LiRPA.PerturbationLpNorm(0, np.inf)
-                self.x = auto_LiRPA.BoundedTensor(self.x, zero_ptb)
-                self.P = auto_LiRPA.BoundedTensor(self.P, zero_ptb)
-            else:
+            if self.x_l != None:
                 ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_u)
                 ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
                 self.x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
                 self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
         
         #self.x, self.z, self.P = self.update_module(self.x, z, self.P)
-        out = self.update_module(self.x, z_coord, z_scale, z_ratio, self.P)
+        out = self.update_module(self.x, z_x, z_y, z_scale, z_ratio, self.P)
         self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
         self.P = out[:, 1:]
         if self.lirpa_initialized:
@@ -226,10 +210,12 @@ class KalmanFilter():
     def initialize_lirpa(self, eps = 10):
         self.x.requires_grad_()
         self.P.requires_grad_()
-        z_coord = self.z[:, :2].detach().clone()
+        z_x = self.z[:, :1].detach().clone()
+        z_y = self.z[:, 1:2].detach().clone()
         z_scale = self.z[:, 2:3].detach().clone()
         z_ratio = self.z[:, 3:].detach().clone()
-        z_coord.requires_grad_()
+        z_x.requires_grad_()
+        z_y.requires_grad_()
         z_scale.requires_grad_()
         z_ratio.requires_grad_()
         self.lirpa_initialized = True
@@ -238,10 +224,10 @@ class KalmanFilter():
                                                        global_input=(self.x, self.P),\
                                                         device="cpu")
         self.update_module = auto_LiRPA.BoundedModule(self.update_module, \
-                                                      global_input=(self.x, z_coord, z_scale, z_ratio, self.P),\
+                                                      global_input=(self.x, z_x, z_y, z_scale, z_ratio, self.P),\
                                                         device="cpu")
 
-    def _compute_prev_bounds_predict(self, method='crown-ibp'):
+    def _compute_prev_bounds_predict(self, method='crown'):
         lb, ub = self.predict_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
@@ -250,7 +236,7 @@ class KalmanFilter():
         self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
         self.P_u = ub[:, 1:]
 
-    def _compute_prev_bounds_update(self, method='crown-ibp'):
+    def _compute_prev_bounds_update(self, method='crown'):
         lb, ub = self.update_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
