@@ -20,11 +20,25 @@ def convert_bbox_to_z(bbox):
   z = torch.nn.Parameter(torch.tensor([[x],[y],[s],[r]], requires_grad=True))
   return z.view(4, 1)
 
+def convert_x_to_bbox(x,score=None):
+  """
+  Takes a bounding box in the centre form [x,y,s,r] and returns it in the form
+    [x1,y1,x2,y2] where x1,y1 is the top left and x2,y2 is the bottom right
+  """
+  w = torch.sqrt(x[2] * x[3])
+  h = x[2] / w
+  if(score==None):
+    #return tf.convert_to_tensor(np.array([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.]).reshape((1,4)), dtype=tf.float32)
+    return torch.tensor([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.]).reshape(1,4)
+  else:
+    return torch.tensor([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.,score]).reshape((1,5))
+
 def generate_data(start, frames, x_delta_mean, x_std_dev, y_delta_mean, y_std_dev):
   curr_frame = start #
   data = []
   label = []
   for i in range(frames):
+      np.random.seed(42)
       x_delta = np.random.normal(x_delta_mean, x_std_dev)
       y_delta = np.random.normal(y_delta_mean, y_std_dev)
       data.append(torch.tensor(curr_frame, requires_grad=True).reshape(4, 1))
@@ -63,35 +77,47 @@ if __name__ == '__main__':
     y_std_dev = 2
     data, label = generate_data([1762.3, 551.36, 48782, 0.44068], 10, x_delta_mean, x_std_dev, y_delta_mean, y_std_dev)
 
-    #define constant velocity model
-    kf = KalmanFilter(dim_x=7, dim_z=4) 
-    kf.predict_module.F = torch.tensor([[[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],\
-                                    [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]]], dtype=torch.float32)
-    kf.update_module.H = torch.tensor([[[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]]], dtype=torch.float32)
+    def kf_initialize():
+      #define constant velocity model
+      kf = KalmanFilter(dim_x=7, dim_z=4) 
+      kf.predict_module.F = torch.tensor([[1,0,0,0,1,0,0],[0,1,0,0,0,1,0],[0,0,1,0,0,0,1],[0,0,0,1,0,0,0],\
+                                      [0,0,0,0,1,0,0],[0,0,0,0,0,1,0],[0,0,0,0,0,0,1]], dtype=torch.float32)
+      kf.update_module.H = torch.tensor([[1,0,0,0,0,0,0],[0,1,0,0,0,0,0],[0,0,1,0,0,0,0],[0,0,0,1,0,0,0]], dtype=torch.float32)
 
-    kf.update_module.R[:, 2:,2:] = kf.update_module.R[:, 2:,2:] * 10.
-    kf.P[:, 4:,4:] = kf.P[:, 4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
-    kf.P *= 10.
-    #self.kf.Q[-1,-1].assign(self.kf.Q[-1,-1] * 0.01)
-    #self.kf.Q[4:,4:].assign(self.kf.Q[4:,4:] * 0.01)
-    kf.predict_module.Q[:, 2,2] = 50
-    kf.predict_module.Q[:, -1,-1] = 50
-    #self.kf.model.Q[-1,-1] *= 0.01
-    #self.kf.model.Q[4:,4:] *= 0.01
-    kf.x.data[:, :4] = data[0]
-    kf.initialize_lirpa()
+      kf.update_module.R[2:,2:] = kf.update_module.R[2:,2:] * 10.
+      kf.P[:, 4:,4:] = kf.P[:, 4:,4:] * 1000. #give high uncertainty to the unobservable initial velocities
+      kf.P *= 10.
+      #self.kf.Q[-1,-1].assign(self.kf.Q[-1,-1] * 0.01)
+      #self.kf.Q[4:,4:].assign(self.kf.Q[4:,4:] * 0.01)
+      kf.predict_module.Q[2,2] = 50
+      kf.predict_module.Q[-1,-1] = 50
+      #self.kf.model.Q[-1,-1] *= 0.01
+      #self.kf.model.Q[4:,4:] *= 0.01
+      kf.x.data[:, :4] = data[0]
+      #kf.initialize_lirpa()
+      #label[0][:2] += 10
+      return kf
+
+    kf_lirpa = kf_initialize()
+    kf_lirpa.initialize_lirpa()
+    kf_u = kf_initialize()
+    kf_l = kf_initialize()
 
     #predict
     total_dist = 0
-    #for i in range(len(label)):
-    kf.predict()
-    #kf.compute_prev_bounds_predict()
-    #total_dist += compute_l2_dist(kf.x, label[0])
-    #print(f'Prediction: {kf.x[0]}, {kf.x[1]}; Actual: {label[i][0]}, {label[i][1]}')
-    #kf.initialize_lirpa()
-    kf.update(label[0].reshape((1, 4, 1)))
+    for i in range(len(label)):
+      kf_l.predict()
+      kf_u.predict()
+      kf_lirpa.predict()
+
+      kf_lirpa.update(label[i].reshape((1, 4, 1)))
+      if i == 0:
+        label[0][:2] -= 10
+      kf_l.update(label[i].reshape((1, 4, 1)))
+      if i == 0:
+        label[0][:2] += 20
+      kf_u.update(label[i].reshape((1, 4, 1)))
+      pass
     #kf.compute_prev_bounds_update()
-    print(kf.x_l)
-    print(kf.x_u)
 
     #print(f'Average distance between prediction and label: {total_dist/len(label)}')

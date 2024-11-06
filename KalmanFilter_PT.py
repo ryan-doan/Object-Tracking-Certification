@@ -76,6 +76,7 @@ class KalmanFilterUpdate(nn.Module):
         self._Ix = torch.eye(dim_x, dtype=torch.float32)
         self._Iz = torch.eye(dim_z, dtype=torch.float32)
         self._zero_diagonal = torch.ones(dim_z, dim_z).fill_diagonal_(0)
+        #self.z_out = 
         self.inv = InverseModule()
         self.level_of_approximation = 50
 
@@ -90,15 +91,14 @@ class KalmanFilterUpdate(nn.Module):
         # Check if all non-diagonal elements are zero
         return torch.all(tensor[~diagonal_mask] == 0)
 
-    def forward(self, x, z_x, z_y, z_scale, z_ratio, P):
-        z = torch.cat((z_x, z_y, z_scale, z_ratio), dim=1)
+    def forward(self, x, z, P):
         PHT = torch.matmul(P, self.H.transpose(0, 1))
 
         S = torch.matmul(PHT.transpose(1, 2), self.H.transpose(0, 1)).transpose(1, 2) + self.R
         #SI = self.inv(S)
         # IMPORTANT! THIS IS JUST A WORKAROUND CURRENTLY! THIS INVERSE METHOD ONLY WORKS WITH DIAGONAL MATRICES (R and H must be diagonal)
-        #SI = 1 / (self._zero_diagonal + S) - self._zero_diagonal
-        SI = self.inv(S)
+        SI = 1 / (self._zero_diagonal + S) - self._zero_diagonal
+        #SI = self.inv(S)
 
         K = torch.matmul(PHT, SI)
 
@@ -156,18 +156,20 @@ class KalmanFilter():
         self.update_module = KalmanFilterUpdate(dim_x, dim_z)
 
         self.countdown = 10
+        self.perturbed = True
 
     def predict(self):
         if self.lirpa_initialized:
             if self.x_l == None:
                 ptb = auto_LiRPA.PerturbationLpNorm(0, np.inf)
                 self.x = auto_LiRPA.BoundedTensor(self.x, ptb)
-                self.P = auto_LiRPA.BoundedTensor(self.P, ptb)
+                #self.P = auto_LiRPA.BoundedTensor(self.P, ptb)
             else:
                 ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_u)
-                ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
+                #ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
                 self.x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
-                self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
+                #self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
+                pass
         
         #self.x, self.P = self.predict_module(self.x, self.P)
         out = self.predict_module(self.x, self.P)
@@ -178,29 +180,26 @@ class KalmanFilter():
         return self.x[0]
     
     def update(self, z):
-        z_x = z[:, :1]
-        z_y = z[:, 1:2]
-        z_scale = z[:, 2:3]
-        z_ratio = z[:, 3:]
         if self.lirpa_initialized:
-            zero_ptb_l2norm = auto_LiRPA.PerturbationLpNorm(norm=2, eps=0)
-            if self.countdown == 0:
-                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=2, eps=self.initial_eps)
+            if self.perturbed:
+                eps = torch.zeros_like(z)
+                eps[:, 0] = self.initial_eps
+                eps[:, 1] = self.initial_eps
+                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, eps=eps)
+                self.perturbed = False
             else:
-                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=2, eps=0)
+                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, eps=torch.zeros_like(z))
             self.countdown -= 1
-            z_x = auto_LiRPA.BoundedTensor(z_x, ptb_z)
-            z_y = auto_LiRPA.BoundedTensor(z_y, ptb_z)
-            z_scale = auto_LiRPA.BoundedTensor(z_scale, zero_ptb_l2norm)
-            z_ratio = auto_LiRPA.BoundedTensor(z_ratio, zero_ptb_l2norm)
+            z = auto_LiRPA.BoundedTensor(z, ptb_z)
             if self.x_l != None:
                 ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_u)
-                ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
+                #ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
                 self.x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
-                self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
+                #self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
+                pass
         
         #self.x, self.z, self.P = self.update_module(self.x, z, self.P)
-        out = self.update_module(self.x, z_x, z_y, z_scale, z_ratio, self.P)
+        out = self.update_module(self.x, z, self.P)
         self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
         self.P = out[:, 1:]
         if self.lirpa_initialized:
@@ -210,21 +209,14 @@ class KalmanFilter():
     def initialize_lirpa(self, eps = 10):
         self.x.requires_grad_()
         self.P.requires_grad_()
-        z_x = self.z[:, :1].detach().clone()
-        z_y = self.z[:, 1:2].detach().clone()
-        z_scale = self.z[:, 2:3].detach().clone()
-        z_ratio = self.z[:, 3:].detach().clone()
-        z_x.requires_grad_()
-        z_y.requires_grad_()
-        z_scale.requires_grad_()
-        z_ratio.requires_grad_()
+        self.z.requires_grad_()
         self.lirpa_initialized = True
         self.initial_eps = eps
         self.predict_module = auto_LiRPA.BoundedModule(self.predict_module, \
                                                        global_input=(self.x, self.P),\
                                                         device="cpu")
         self.update_module = auto_LiRPA.BoundedModule(self.update_module, \
-                                                      global_input=(self.x, z_x, z_y, z_scale, z_ratio, self.P),\
+                                                      global_input=(self.x, self.z, self.P),\
                                                         device="cpu")
 
     def _compute_prev_bounds_predict(self, method='crown'):
