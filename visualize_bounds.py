@@ -10,10 +10,32 @@ import argparse
 def parse_args():
     parser = argparse.ArgumentParser(description='Bounds visualize')
     parser.add_argument("-bounds-file", help="File with bounds data.", type=str,
-                        default='C:\\Users\\doann\\Documents\\lirpa\\PyTorch_Kalman\\output\\visualize\\crown-ibp-new-ptb.txt')
+                        default='C:\\Users\\doann\\Documents\\lirpa\\PyTorch_Kalman\\output\\visualize\\crown.txt')
     parser.add_argument("-img", help="Image to overlay the bounds.", type=str, 
                         default='C:\\Users\\doann\\Documents\\lirpa\\PyTorch_Kalman\\mot_benchmark\\train\\ADL-Rundle-6\\img1')
     return parser.parse_args()
+
+def convert_x_to_bbox(bounds,score=None):
+    """
+    Takes a bounding box in the centre form [x,y,s,r] and returns it in the form
+    [x1,y1,x2,y2] where x1,y1 is the top left and x2,y2 is the bottom right
+    """
+    x_l = bounds[2]
+    y_l = bounds[3]
+    s_l = bounds[4]
+    x_u = bounds[5]
+    y_u = bounds[6]
+    s_u = bounds[7]
+    r = bounds[8]
+
+    w_l = np.sqrt(s_l * r)
+    h_l = s_l / w_l
+    w_u = np.sqrt(s_u * r)
+    h_u = s_u / w_u
+
+    bbox_l = np.array([x_l-w_l/2,y_l-h_l/2,x_u+w_l/2,y_u+h_l/2])
+    bbox_u = np.array([x_l-w_u/2,y_l-h_u/2,x_u+w_u/2,y_u+h_u/2])
+    return bbox_l, bbox_u
 
 index = 0
 
@@ -22,7 +44,7 @@ if __name__ == '__main__':
     bounds_file = args.bounds_file
     img = args.img
 
-    bounds_data = np.loadtxt(bounds_file, delimiter=',')
+    bounds_data = np.loadtxt(bounds_file, delimiter=',', dtype=np.float32)
 
     fig = plt.figure()
     ax1 = fig.add_subplot(111, aspect='equal')
@@ -36,43 +58,33 @@ if __name__ == '__main__':
         height, width = im.shape[:2]
         ax1.imshow(im)
         plt.title('Frame ' + str(frame))
-        bounds = np.rint(bounds).astype(np.int64)
 
-        #draw lower and upper bbox
-        if (bounds[6] < 0 or bounds[6] > width) and (bounds[7] < 0 or bounds[7] > width):
-            pass
-        elif (bounds[8] < 0 or bounds[8] > height) and (bounds[9] < 0 or bounds[9] > height):
-            pass
-        else:
-            ax1.add_patch(patches.Rectangle((bounds[6],bounds[7]),bounds[8]-bounds[6],bounds[9]-bounds[7],fill=False,lw=1,ec='red'))
+        bbox_l, bbox_u = convert_x_to_bbox(bounds,score=None)
 
-        if (bounds[2] < 0 or bounds[2] > width) and (bounds[3] < 0 or bounds[3] > width):
-            pass
-        elif (bounds[4] < 0 or bounds[4] > height) and (bounds[5] < 0 or bounds[5] > height):
-            pass
-        else:
-            ax1.add_patch(patches.Rectangle((bounds[2],bounds[3]),bounds[4]-bounds[2],bounds[5]-bounds[3],fill=False,lw=1,ec='red'))
+        ax1.add_patch(patches.Rectangle((bbox_l[0], bbox_l[1]),bbox_l[2]-bbox_l[0],bbox_l[3]-bbox_l[1],fill=False,lw=1,ec='red'))
+
+        ax1.add_patch(patches.Rectangle((bbox_u[0], bbox_u[1]),bbox_u[2]-bbox_u[0],bbox_u[3]-bbox_u[1],fill=False,lw=1,ec='red'))
 
         #draw lines connecting their corners
         u_corners = [
-            (bounds[6], bounds[7]),
-            (bounds[6], bounds[9]),
-            (bounds[8], bounds[7]),
-            (bounds[8], bounds[9])
+            (bbox_u[0], bbox_u[1]),
+            (bbox_u[0], bbox_u[3]),
+            (bbox_u[2], bbox_u[1]),
+            (bbox_u[2], bbox_u[3])
         ]
 
         l_corners = [
-            (bounds[2], bounds[3]),
-            (bounds[2], bounds[5]),
-            (bounds[4], bounds[3]),
-            (bounds[4], bounds[5])
+            (bbox_l[0], bbox_l[1]),
+            (bbox_l[0], bbox_l[3]),
+            (bbox_l[2], bbox_l[1]),
+            (bbox_l[2], bbox_l[3])
         ]
 
         for pt1, pt2 in zip(l_corners, u_corners):
             ax1.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], color='red', lw=1)
 
         #draw the actual detection
-        ax1.add_patch(patches.Rectangle((bounds[10],bounds[11]),bounds[12]-bounds[10],bounds[13]-bounds[11],fill=False,lw=1,ec='green'))
+        ax1.add_patch(patches.Rectangle((bounds[9],bounds[10]),bounds[11]-bounds[9],bounds[12]-bounds[10],fill=False,lw=1,ec='green'))
 
         fig.canvas.flush_events()
         plt.draw()

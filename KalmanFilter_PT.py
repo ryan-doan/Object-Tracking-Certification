@@ -161,7 +161,7 @@ class KalmanFilter():
     def predict(self):
         if self.lirpa_initialized:
             if self.x_l == None:
-                ptb = auto_LiRPA.PerturbationLpNorm(0, np.inf)
+                ptb = auto_LiRPA.PerturbationLpNorm(eps=0, norm=np.inf)
                 self.x = auto_LiRPA.BoundedTensor(self.x, ptb)
                 #self.P = auto_LiRPA.BoundedTensor(self.P, ptb)
             else:
@@ -187,16 +187,22 @@ class KalmanFilter():
                 eps[:, 1] = self.initial_eps
                 ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, eps=eps)
                 self.perturbed = False
-            else:
-                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, eps=torch.zeros_like(z))
+                z = auto_LiRPA.BoundedTensor(z, ptb_z)
             self.countdown -= 1
-            z = auto_LiRPA.BoundedTensor(z, ptb_z)
             if self.x_l != None:
-                ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_u)
+                ptb_x_l = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x)
+                ptb_x_u = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x, x_U = self.x_u)
                 #ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
-                self.x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
+                x = auto_LiRPA.BoundedTensor(self.x, ptb_x_l)
                 #self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
-                pass
+                out = self.update_module(x, z, self.P)
+                self._compute_prev_bounds_update(l=True, u=False)
+                x = auto_LiRPA.BoundedTensor(self.x, ptb_x_u)
+                out = self.update_module(x, z, self.P)
+                self._compute_prev_bounds_update(l=False, u=True)
+                self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
+                self.P = out[:, 1:]
+                return self.x[0]
         
         #self.x, self.z, self.P = self.update_module(self.x, z, self.P)
         out = self.update_module(self.x, z, self.P)
@@ -228,14 +234,17 @@ class KalmanFilter():
         self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
         self.P_u = ub[:, 1:]
 
-    def _compute_prev_bounds_update(self, method='crown'):
+    def _compute_prev_bounds_update(self, method='crown', l=True, u=True):
         lb, ub = self.update_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
-        self.x_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))
-        self.P_l = lb[:, 1:]
-        self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
-        self.P_u = ub[:, 1:]
+        
+        if l:
+            self.x_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))
+            self.P_l = lb[:, 1:]
+        if u:
+            self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
+            self.P_u = ub[:, 1:]
     
     def _reshape_z(self, z, dim_z, ndim):
         with torch.no_grad:

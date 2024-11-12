@@ -161,11 +161,11 @@ class KalmanBoxTracker(object):
   def record_bounds(self, frame):
     #Write to bounds_out_file with format: "frame, id, x_l, x_u"
     if self.bounds_out_file != None and self.kf.x_l != None and self.kf.x_u != None:
-      x_l = convert_x_to_bbox(self.kf.x_l[0]).squeeze()
-      x_u = convert_x_to_bbox(self.kf.x_u[0]).squeeze()
+      x_l = self.kf.x_l[0].squeeze(1)
+      x_u = self.kf.x_u[0].squeeze(1)
       x_pred = self.get_state().squeeze()
-      x_l_str = ", ".join("{:.4f}".format(x) for x in x_l.tolist())
-      x_u_str = ", ".join("{:.4f}".format(x) for x in x_u.tolist())
+      x_l_str = ", ".join("{:.4f}".format(x) for x in x_l.tolist()[:3])
+      x_u_str = ", ".join("{:.4f}".format(x) for x in x_u.tolist()[:4])
       x_pred_str = ", ".join("{:.4f}".format(x) for x in x_pred.tolist())
       self.bounds_out_data.append(f'{frame}, {self.id}, {x_l_str}, {x_u_str}, {x_pred_str}\n')
     

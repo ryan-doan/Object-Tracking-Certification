@@ -100,6 +100,8 @@ if __name__ == '__main__':
 
     kf_lirpa = kf_initialize()
     kf_lirpa.initialize_lirpa()
+    kf_diag1 = kf_initialize()
+    kf_diag2 = kf_initialize()
     kf_u = kf_initialize()
     kf_l = kf_initialize()
 
@@ -109,6 +111,8 @@ if __name__ == '__main__':
       kf_l.predict()
       kf_u.predict()
       kf_lirpa.predict()
+      kf_diag1.predict()
+      kf_diag2.predict()
 
       kf_lirpa.update(label[i].reshape((1, 4, 1)))
       if i == 0:
@@ -117,6 +121,13 @@ if __name__ == '__main__':
       if i == 0:
         label[0][:2] += 20
       kf_u.update(label[i].reshape((1, 4, 1)))
+      if i == 0:
+        label[0][0] -= 20
+      kf_diag1.update(label[i].reshape((1, 4, 1)))
+      if i == 0:
+        label[0][0] += 20
+        label[0][1] -= 20
+      kf_diag2.update(label[i].reshape((1, 4, 1)))
       pass
     #kf.compute_prev_bounds_update()
 
