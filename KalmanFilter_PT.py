@@ -141,7 +141,6 @@ class KalmanFilter():
         self.dim_u = dim_u
         self.id = id
         self.lirpa_initialized = False
-        #self.C = torch.concat(torch.eye(dim_x).unsqueeze(0), torch.zeros((1, dim_x)))
 
         self.x = torch.zeros((1, dim_x, 1), dtype=torch.float32)
         self.P = torch.eye(dim_x, dtype=torch.float32).unsqueeze(0)
@@ -149,8 +148,8 @@ class KalmanFilter():
         
         self.x_l = None
         self.x_u = None
-        self.P_l = None
-        self.P_u = None
+        self.x_l_u = None
+        self.x_u_l = None
 
         self.predict_module = KalmanFilterPredict(dim_x)
         self.update_module = KalmanFilterUpdate(dim_x, dim_z)
@@ -163,15 +162,10 @@ class KalmanFilter():
             if self.x_l == None:
                 ptb = auto_LiRPA.PerturbationLpNorm(eps=0, norm=np.inf)
                 self.x = auto_LiRPA.BoundedTensor(self.x, ptb)
-                #self.P = auto_LiRPA.BoundedTensor(self.P, ptb)
             else:
                 ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_u)
-                #ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
                 self.x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
-                #self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
-                pass
         
-        #self.x, self.P = self.predict_module(self.x, self.P)
         out = self.predict_module(self.x, self.P)
         self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
         self.P = out[:, 1:]
@@ -180,26 +174,36 @@ class KalmanFilter():
         return self.x[0]
     
     def update(self, z):
+        def _preprocess_x_bounds():
+            if self.x_l_u is None:
+                self.x_l_u = self.x.detach().clone()
+                self.x_u_l = self.x.detach().clone()
+                self.x_l_u[:, 0] = self.x_u[:, 0]
+                self.x_l_u[:, 4] = self.x_u[:, 4]
+                self.x_u_l[:, 0] = self.x_l[:, 0]
+                self.x_u_l[:, 4] = self.x_l[:, 4]
+            ptb_x_l = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_l_u)
+            ptb_x_u = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_u_l, x_U = self.x_u)
+            return ptb_x_l, ptb_x_u
         if self.lirpa_initialized:
             if self.perturbed:
                 eps = torch.zeros_like(z)
                 eps[:, 0] = self.initial_eps
                 eps[:, 1] = self.initial_eps
                 ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, eps=eps)
-                self.perturbed = False
                 z = auto_LiRPA.BoundedTensor(z, ptb_z)
             self.countdown -= 1
-            if self.x_l != None:
-                ptb_x_l = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x)
-                ptb_x_u = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x, x_U = self.x_u)
-                #ptb_P = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.P_l, x_U = self.P_u)
+            if self.x_l is not None:
+                #self.x_l[:, 4:6] = 0
+                #self.x_u[:, 4:6] = 0
+                #self.x[:, 4:6] = 0
+                ptb_x_l, ptb_x_u = _preprocess_x_bounds()
                 x = auto_LiRPA.BoundedTensor(self.x, ptb_x_l)
-                #self.P = auto_LiRPA.BoundedTensor(self.P, ptb_P)
                 out = self.update_module(x, z, self.P)
-                self._compute_prev_bounds_update(l=True, u=False)
+                self._compute_prev_bounds_update(l=True)
                 x = auto_LiRPA.BoundedTensor(self.x, ptb_x_u)
                 out = self.update_module(x, z, self.P)
-                self._compute_prev_bounds_update(l=False, u=True)
+                self._compute_prev_bounds_update(u=True)
                 self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
                 self.P = out[:, 1:]
                 return self.x[0]
@@ -229,22 +233,24 @@ class KalmanFilter():
         lb, ub = self.predict_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
-        self.x_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))
-        self.P_l = lb[:, 1:]
-        self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
-        self.P_u = ub[:, 1:]
+        if self.x_l != None:
+            self.x_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))
+            self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
 
-    def _compute_prev_bounds_update(self, method='crown', l=True, u=True):
+    def _compute_prev_bounds_update(self, method='crown', l=False, u=False):
         lb, ub = self.update_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
-        
+        if not l and not u:
+            self.x_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))
+            self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
+            return
         if l:
             self.x_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))
-            self.P_l = lb[:, 1:]
+            self.x_l_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
         if u:
             self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
-            self.P_u = ub[:, 1:]
+            self.x_u_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))
     
     def _reshape_z(self, z, dim_z, ndim):
         with torch.no_grad:
