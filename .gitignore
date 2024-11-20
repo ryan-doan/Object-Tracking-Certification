@@ -2,3 +2,4 @@ nn_graph_test.py
 TrackEval
 mot_benchmark
 KalmanFilterNN.py
+visualize_output

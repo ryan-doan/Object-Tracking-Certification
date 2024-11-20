@@ -176,7 +176,9 @@ class KalmanBoxTracker(object):
         x_u_l_str = ", ".join("{:.4f}".format(x) for x in x_u_l.tolist()[:3])
         self.bounds_out_data.append(f'{frame}, {self.id}, {x_l_str}, {x_l_u_str}, {x_u_l_str}, {x_u_str}, {x_pred_str}\n')
         return
-      self.bounds_out_data.append(f'{frame}, {self.id}, {x_l_str}, {x_u_str}, {x_pred_str}\n')
+      self.bounds_out_file.write(f'{frame}, {self.id}, {x_l_str}, {x_u_str}, {x_pred_str}\n')
+      #self.bounds_out_file.flush()
+      #self.bounds_out_data.append(f'{frame}, {self.id}, {x_l_str}, {x_u_str}, {x_pred_str}\n')
     
   def write_bounds(self):
     if self.bounds_out_file != None:
@@ -312,7 +314,7 @@ class Sort(object):
         i -= 1
         # remove dead tracklet
         if(trk.time_since_update > self.max_age):
-          self.trackers[i].write_bounds()
+          #self.trackers[i].write_bounds()
           self.trackers.pop(i)
     if(len(ret)>0):
       return np.concatenate(ret)
@@ -403,8 +405,8 @@ if __name__ == '__main__':
           plt.draw()
           ax1.cla()
 
-      for trk in mot_tracker.trackers:
-        trk.write_bounds()
+      #for trk in mot_tracker.trackers:
+        #trk.write_bounds()
     
     bounds_out_file.close()
 
