@@ -22,11 +22,11 @@ def convert_x_to_bbox(bounds,score=None):
     """
     x_l = bounds[0]
     y_l = bounds[1]
-    s_l = bounds[2] / 2
+    s_l = bounds[2]
     x_u = bounds[3]
     y_u = bounds[4]
-    s_u = bounds[5] / 2
-    r = bounds[6] * 2
+    s_u = bounds[5]
+    r = bounds[6]
 
     w_l = np.sqrt(s_l * r)
     h_l = s_l / w_l

@@ -96,12 +96,14 @@ class KalmanFilterUpdate(nn.Module):
 
         S = torch.matmul(PHT.transpose(1, 2), self.H.transpose(0, 1)).transpose(1, 2) + self.R
         #SI = self.inv(S)
-        # IMPORTANT! THIS IS JUST A WORKAROUND CURRENTLY! THIS INVERSE METHOD ONLY WORKS WITH DIAGONAL MATRICES (R and H must be diagonal)
+        # IMPORTANT! THIS INVERSE METHOD ONLY WORKS WITH DIAGONAL MATRICES (R and H must be diagonal)
         SI = 1 / (self._zero_diagonal + S) - self._zero_diagonal
         #SI = self.inv(S)
 
+        # K contains information on our vector field.
         K = torch.matmul(PHT, SI)
 
+        # y contains information on x, y coordinates of our field.
         y = z - torch.matmul(x.transpose(1, 2), self.H.transpose(0, 1)).transpose(1, 2)
 
         x = x + torch.matmul(K, y)
@@ -128,7 +130,7 @@ class KalmanFilterUpdate(nn.Module):
         return SI * a
 
 class KalmanFilter():
-    def __init__(self, dim_x, dim_z, id=0, dim_u=0):
+    def __init__(self, dim_x, dim_z, id=0, dim_u=0, method='reset-velo'):
         if dim_x < 1:
             raise ValueError('dim_x must be 1 or greater')
         if dim_z < 1:
@@ -141,6 +143,7 @@ class KalmanFilter():
         self.dim_u = dim_u
         self.id = id
         self.lirpa_initialized = False
+        self.method = method
 
         self.x = torch.zeros((1, dim_x, 1), dtype=torch.float32)
         self.P = torch.eye(dim_x, dtype=torch.float32).unsqueeze(0)
@@ -158,13 +161,44 @@ class KalmanFilter():
         self.perturbed = True
 
     def predict(self):
-        if self.lirpa_initialized:
-            if self.x_l == None:
-                ptb = auto_LiRPA.PerturbationLpNorm(eps=0, norm=np.inf)
+        def reset_velo():
+            if self.x_l != None:
+                ptb = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L=self.x_l, x_U=self.x_u)
                 self.x = auto_LiRPA.BoundedTensor(self.x, ptb)
+                
+            out = self.predict_module(self.x, self.P)
+            self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
+            self.P = out[:, 1:]
+            self._compute_prev_bounds_predict()
+            return self.x[0]
+
+        def split_ptb():
+            if self.x_l == None:
+                # Same calculation if x_l is None
+                return reset_velo()
+            
+            # Compute lower half of ptb set
+            ptb_x_l = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_l_u)
+            x = auto_LiRPA.BoundedTensor(self.x, ptb_x_l)
+            out = self.predict_module(x, self.P)
+            self._compute_prev_bounds_predict()
+
+            # Compute upper half of ptb set
+            ptb_x_l = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_u_l, x_U = self.x_u)
+            x = auto_LiRPA.BoundedTensor(self.x, ptb_x_l)
+            out = self.predict_module(x, self.P)
+            self._compute_prev_bounds_predict()
+            self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
+            self.P = out[:, 1:]
+            return self.x[0]
+
+        if self.lirpa_initialized:
+            if self.method == 'reset-velo':
+                return reset_velo()
+            elif self.method == 'split-ptb':
+                return split_ptb()
             else:
-                ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_u)
-                self.x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
+                raise NotImplementedError
         
         out = self.predict_module(self.x, self.P)
         self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
@@ -174,46 +208,66 @@ class KalmanFilter():
         return self.x[0]
     
     def update(self, z):
-        def _preprocess_x_bounds():
-            if self.x_l_u is None:
-                self.x_l_u = self.x.detach().clone()
-                self.x_u_l = self.x.detach().clone()
-                self.x_l_u[:, 0] = self.x_u[:, 0]
-                self.x_l_u[:, 4] = self.x_u[:, 4]
-                self.x_u_l[:, 0] = self.x_l[:, 0]
-                self.x_u_l[:, 4] = self.x_l[:, 4]
-            ptb_x_l = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_l, x_U = self.x_l_u)
-            ptb_x_u = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L = self.x_u_l, x_U = self.x_u)
-            return ptb_x_l, ptb_x_u
+        def reset_velo(z):
+            self.x[:, 4:6] = 0
+            self.x_l[:, 4:6] = 0
+            self.x_u[:, 4:6] = 0
+            z_l = z.detach().clone()
+            z_u = z.detach().clone()
+            z_l[:, :2] -= self.initial_eps
+            z_u[:, :2] += self.initial_eps
+            ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L=z_l, x_U=z_u)
+            z = auto_LiRPA.BoundedTensor(z, ptb_z)
+            if self.x_l != None:
+                ptb = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L=self.x_l, x_U=self.x_u)
+                self.x = auto_LiRPA.BoundedTensor(self.x, ptb)
+            out = self.update_module(self.x, z, self.P)
+            self._compute_prev_bounds_update()
+            self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
+            self.P = out[:, 1:]
+            return self.x[0]
+        
+        def split_ptb(z):
+            # Compute lower half of ptb set
+            z_l = z.detach().clone()
+            z_l[:, :2] -= self.initial_eps
+            ptb_z_l = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L=z_l, x_U=z)
+            z = auto_LiRPA.BoundedTensor(z, ptb_z_l)
+            x = self.x
+            if self.x_l != None:
+                ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L=self.x_l, x_U=self.x_l_u)
+                x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
+            out = self.update_module(x, auto_LiRPA.BoundedTensor(z, ptb_z_l), self.P)
+            self._compute_prev_bounds_update(l=True)
+
+            # Compute upper half of ptb set
+            z_u = z.detach().clone()
+            z_u[:, :2] += self.initial_eps
+            if self.x_u != None:
+                ptb_x = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L=self.x_u_l, x_U=self.x_u)
+                x = auto_LiRPA.BoundedTensor(self.x, ptb_x)
+            ptb_z_u = auto_LiRPA.PerturbationLpNorm(norm=np.inf, x_L=z, x_U=z_u)
+            z = auto_LiRPA.BoundedTensor(z, ptb_z_l)
+            out = self.update_module(x, auto_LiRPA.BoundedTensor(z, ptb_z_u), self.P)
+            self._compute_prev_bounds_update(u=True)
+
+            #Return results
+            self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
+            self.P = out[:, 1:]
+            return self.x[0]
+        
         if self.lirpa_initialized:
-            if self.perturbed:
-                eps = torch.zeros_like(z)
-                eps[:, 0] = self.initial_eps
-                eps[:, 1] = self.initial_eps
-                ptb_z = auto_LiRPA.PerturbationLpNorm(norm=np.inf, eps=eps)
-                z = auto_LiRPA.BoundedTensor(z, ptb_z)
-            self.countdown -= 1
-            if self.x_l is not None:
-                #self.x_l[:, 4:6] = 0
-                #self.x_u[:, 4:6] = 0
-                #self.x[:, 4:6] = 0
-                ptb_x_l, ptb_x_u = _preprocess_x_bounds()
-                x = auto_LiRPA.BoundedTensor(self.x, ptb_x_l)
-                out = self.update_module(x, z, self.P)
-                self._compute_prev_bounds_update(l=True)
-                x = auto_LiRPA.BoundedTensor(self.x, ptb_x_u)
-                out = self.update_module(x, z, self.P)
-                self._compute_prev_bounds_update(u=True)
-                self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
-                self.P = out[:, 1:]
-                return self.x[0]
+            if self.method == 'reset-velo':
+                return reset_velo(z)
+            elif self.method == 'split-ptb':
+                return split_ptb(z)
+            else:
+                raise NotImplementedError
         
         #self.x, self.z, self.P = self.update_module(self.x, z, self.P)
         out = self.update_module(self.x, z, self.P)
         self.x = torch.reshape(out[:, 0], (1, self.dim_x,1))
         self.P = out[:, 1:]
-        if self.lirpa_initialized:
-            self._compute_prev_bounds_update()
         return self.x[0]
 
     def initialize_lirpa(self, eps = 10):
@@ -229,13 +283,20 @@ class KalmanFilter():
                                                       global_input=(self.x, self.z, self.P),\
                                                         device="cpu")
 
-    def _compute_prev_bounds_predict(self, method='crown'):
+    def _compute_prev_bounds_predict(self, method='crown', l=False, u=False):
         lb, ub = self.predict_module.compute_bounds(method=method)
         #print(f'Lower bound: {lb[:, 0, :4]}')
         #print(f'Upper bound: {ub[:, 0, :4]}')
-        if self.x_l != None:
+        if not l and not u:
             self.x_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))
             self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
+            return
+        if l:
+            self.x_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))
+            self.x_l_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
+        if u:
+            self.x_u = torch.reshape(ub[:, 0], (1, self.dim_x,1))
+            self.x_u_l = torch.reshape(lb[:, 0], (1, self.dim_x,1))
 
     def _compute_prev_bounds_update(self, method='crown', l=False, u=False):
         lb, ub = self.update_module.compute_bounds(method=method)

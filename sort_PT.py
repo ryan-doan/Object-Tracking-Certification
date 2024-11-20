@@ -167,16 +167,16 @@ class KalmanBoxTracker(object):
         #print("Exponential bound found.")
       x_pred = self.get_state().squeeze()
       x_l_str = ", ".join("{:.4f}".format(x) for x in x_l.tolist()[:3])
-      x_u_str = ", ".join("{:.4f}".format(x) for x in x_u.tolist()[:3])
+      x_u_str = ", ".join("{:.4f}".format(x) for x in x_u.tolist()[:4])
       x_pred_str = ", ".join("{:.4f}".format(x) for x in x_pred.tolist())
       if self.kf.x_l_u is not None:
         x_l_u = self.kf.x_l_u[0].squeeze(1)
         x_u_l = self.kf.x_u_l[0].squeeze(1)
-        x_l_u_str = ", ".join("{:.4f}".format(x) for x in x_l_u.tolist()[:4])
-        x_u_l_str = ", ".join("{:.4f}".format(x) for x in x_u_l.tolist()[:4])
-        self.bounds_out_data.append(f'{frame}, {self.id}, {x_l_str}, {x_l_u_str}, {x_u_str}, {x_u_l_str}, {x_pred_str}\n')
+        x_l_u_str = ", ".join("{:.4f}".format(x) for x in x_l_u.tolist()[:3])
+        x_u_l_str = ", ".join("{:.4f}".format(x) for x in x_u_l.tolist()[:3])
+        self.bounds_out_data.append(f'{frame}, {self.id}, {x_l_str}, {x_l_u_str}, {x_u_l_str}, {x_u_str}, {x_pred_str}\n')
         return
-      self.bounds_out_data.append(f'{frame}, {self.id}, {x_l_str}, {x_l_str}, {x_u_str}, {x_u_str}, {x_pred_str}\n')
+      self.bounds_out_data.append(f'{frame}, {self.id}, {x_l_str}, {x_u_str}, {x_pred_str}\n')
     
   def write_bounds(self):
     if self.bounds_out_file != None:
